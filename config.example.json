@@ -1,0 +1,32 @@
+{
+  "freee": {
+    "companyId": "<your-freee-company-id>",
+    "tokenSource": "environment-or-platform-credential-store"
+  },
+  "notion": {
+    "apiVersion": "2022-06-28",
+    "documentSources": {
+      "quotation": "<quotation-header-data-source-id>",
+      "quotationLine": "<quotation-line-data-source-id>",
+      "invoice": "<invoice-header-data-source-id>",
+      "invoiceLine": "<invoice-line-data-source-id>"
+    },
+    "propertyMap": {
+      "freeeId": "<freee-document-id-property>",
+      "companyId": "<freee-company-id-property>",
+      "documentNumber": "<document-number-property>",
+      "status": "<document-status-property>",
+      "syncState": "<sync-state-property>",
+      "sourceHash": "<source-hash-property>",
+      "syncedAt": "<sync-time-property>"
+    }
+  },
+  "policy": {
+    "direction": "freee-to-notion",
+    "documentTypes": ["quotation", "invoice"],
+    "maxDocumentsPerRun": 100,
+    "allowHeaderCreate": false,
+    "allowHardDelete": false,
+    "allowArchiveRemovedLines": true
+  }
+}
