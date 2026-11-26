@@ -35,6 +35,16 @@ Keep `src/local-monitor.mjs` events sanitized. The host's notification sink shou
 
 If a process exits, inspect the ledger status and exact target via API GET before restarting. A live lease blocks a second run. A stale lease is reclaimed only when the same host can confirm the owner process has exited. An operation marked `started` or `unknown` remains blocked until exact read-back confirms one result; missing or multiple candidates require manual investigation.
 
-## 6. Rollout checks
+## 6. Scheduled/manual one-shot entry
+
+Create a host-owned JavaScript module outside this repository that exports `createSyncHost()` and returns the configured `service` and optional `emit` function. The host module loads local config, secure OAuth stores, real API ports, the persistent SQLite path, and the deployment-approved policy. Invoke the same one-shot entry manually or from the OS scheduler:
+
+```sh
+npm run run:sync -- --host-module /absolute/path/to/protected-host.mjs
+```
+
+The wrapper runs exactly once, emits sanitized start/completion/failure events, and exits nonzero on a failed run. It does not create or enable a schedule. The registered sync service acquires the SQLite single-writer lease, so overlapping scheduler/manual invocations fail closed. Keep scheduler registration, account, working directory, log retention and stop/restart procedure in the adopting project's operational runbook.
+
+## 7. Rollout checks
 
 Start with fake API transports and a new temporary SQLite file. Verify scope, inventory, totals/tax, relations, one mapped project, then a second distinct mapping, notification sink, restart and restore procedures. Before live rollout, separately review API app permissions, credential-store implementation, callback handling, operator authorization, network access, task account, working directory, schedule, backup, alert destination and rollback. This candidate's tests do not certify those deployment-specific controls.

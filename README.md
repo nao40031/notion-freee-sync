@@ -22,6 +22,8 @@ Before writing, the runner verifies the active local policy scope, enumerates on
 
 `createOAuthTokenProvider` exchanges authorization codes and refreshes tokens through a host-owned secure token store. The store must implement a cross-process `withLock` around refresh-token reads and writes; this is needed when a scheduled run and manual run can overlap. The repository does not ship a platform credential-store adapter or an interactive callback server. `src/local-monitor.mjs` provides sanitized local events and a notification sink port; a host chooses and secures the actual destination.
 
+`npm run run:sync -- --host-module <absolute-path-outside-repository>` is the single-run entry point for a scheduler or operator. The external host module exports `createSyncHost()` and returns `{ service, emit }`; it owns credentials, approval/setup, and event delivery. The service's SQLite lease rejects concurrent invocations. The wrapper runs once and exits; Task Scheduler/cron registration and enablement remain deployment-specific.
+
 ## Project configuration
 
 Copy `config.example.json` outside the repository and supply the target company's freee ID, Notion data sources, property names/types, relation mappings, state values, policy scope, and invoice-draft mappings. Keep credentials, local configuration, SQLite, logs and notification state outside Git. The sample contains placeholders only. A host must provide a protected config/SQLite path, token store, OAuth registration flow, and explicit operation/policy approval interface.
