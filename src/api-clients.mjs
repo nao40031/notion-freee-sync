@@ -40,6 +40,24 @@ export function createFreeeReadClient({baseUrl="https://api.freee.co.jp", tokenP
   });
 }
 
+/** One-shot first-registration POST port. It exposes only quotation/invoice
+ * creation and deliberately has no retry or update method. The durable caller
+ * must record intent before invoking it and mark transport ambiguity unknown. */
+export function createFreeeRegistrationClient({baseUrl="https://api.freee.co.jp",tokenProvider,fetchImpl=globalThis.fetch,signal}={}){
+  if(typeof tokenProvider!=="function"||typeof fetchImpl!=="function")throw new SyncError("freee_registration_client_config_invalid");
+  return Object.freeze({async createDocument(type,companyId,body){
+    if(!new Set(["quotation","invoice"]).has(type)||!/^[0-9]+$/.test(String(companyId))||!/^[0-9]+$/.test(String(body?.company_id))||
+      String(body.company_id)!==String(companyId)||!/^[0-9]+$/.test(String(body?.partner_id))||Number(body.partner_id)<=0)throw new SyncError("freee_registration_identity_invalid");
+    const numberKey=type==="quotation"?"quotation_number":"invoice_number";
+    if(typeof body[numberKey]!=="string"||!body[numberKey].trim()||!Array.isArray(body.lines)||body.lines.length===0)throw new SyncError("freee_registration_body_invalid");
+    const path=type==="quotation"?"/api/1/quotations":"/api/1/invoices",url=new URL(path,baseUrl);let response;
+    try{response=await fetchImpl(url.toString(),{method:"POST",signal,headers:{Authorization:`Bearer ${await tokenProvider()}`,"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify(body)});}
+    catch{throw new SyncError("freee_post_result_unknown");}
+    if(!response.ok)throw new SyncError(response.status===401?"api_auth_failed":`freee_post_http_${response.status}`,{status:response.status});
+    try{return await response.json();}catch{throw new SyncError("freee_post_response_invalid");}
+  }});
+}
+
 export function createNotionClient({tokenProvider,apiVersion="2022-06-28",fetchImpl=globalThis.fetch,baseUrl="https://api.notion.com/v1",writeScope=null,signal}={}) {
   if (typeof tokenProvider!=="function" || typeof fetchImpl!=="function") throw new SyncError("notion_client_config_invalid");
   const read=async(path)=>{

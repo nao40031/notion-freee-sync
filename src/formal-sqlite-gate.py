@@ -114,7 +114,7 @@ def process_is_alive(pid):
         return True
 
 def main():
-    p=argparse.ArgumentParser(); p.add_argument("action",choices=["acquire","release","status","policy-status","recovery-items","policy-approve","policy-revoke","phase8-intent","phase8-finish","phase8-unknown","phase8-reconcile"]); p.add_argument("--db",required=True); p.add_argument("--config",required=True); p.add_argument("--token",default=""); p.add_argument("--owner-pid",type=int,default=0); p.add_argument("--evidence-b64",default=""); a=p.parse_args(); cfg=load_config(a.config)
+    p=argparse.ArgumentParser(); p.add_argument("action",choices=["acquire","release","status","policy-status","recovery-items","policy-approve","policy-revoke","phase8-intent","phase8-finish","phase8-unknown","phase8-reconcile","external-intent","external-finish","external-unknown","external-reconcile","draft-state-get","draft-state-put"]); p.add_argument("--db",required=True); p.add_argument("--config",required=True); p.add_argument("--token",default=""); p.add_argument("--owner-pid",type=int,default=0); p.add_argument("--evidence-b64",default=""); p.add_argument("--request-id",default=""); p.add_argument("--record-b64",default=""); a=p.parse_args(); cfg=load_config(a.config)
     db=connect(a.db)
     try:
       db.execute("BEGIN IMMEDIATE")
@@ -127,6 +127,13 @@ def main():
         token=uuid.uuid4().hex; db.execute("INSERT INTO writer_lease VALUES(1,?,?,?,?)",(token,socket.gethostname(),a.owner_pid,datetime.now(timezone.utc).isoformat())); db.execute("INSERT INTO writer_audit(event,token,detail) VALUES('lease_acquired',?,?)",(token,json.dumps({"pid":a.owner_pid}))); db.commit(); print(json.dumps({"ok":True,"token":token})); return
       if a.action in ("status","policy-status"):
         lease=db.execute("SELECT token,host,pid,started_at FROM writer_lease WHERE id=1").fetchone(); ops=db.execute("SELECT op_key,request_id,method,target,payload_hash,status,result_id,error,at,approval_id,doc_key FROM external_ops ORDER BY at").fetchall(); pol=latest_policy(db,cfg); db.commit(); print(json.dumps({"ok":True,"lease":lease,"ops":ops,"policy":{"policy_id":pol["policy_id"],"scope":pol["scope"],"approved_at":pol["approved_at"],"status":"active"} if pol else {"policy_id":cfg["policy_id"],"scope":policy_scope(cfg),"status":"inactive"}})); return
+      if a.action=="draft-state-get":
+        if not a.request_id: raise RuntimeError("draft_state_request_id_required")
+        rows=db.execute("SELECT detail FROM writer_audit WHERE event='invoice_draft_generation_state' ORDER BY seq DESC").fetchall(); found=None
+        for raw, in rows:
+          item=json.loads(raw)
+          if item.get("request_id")==a.request_id: found=item.get("record"); break
+        db.commit(); print(json.dumps({"ok":True,"record":found},ensure_ascii=False)); return
       if a.action=="recovery-items":
         rows=db.execute("SELECT detail FROM writer_audit WHERE event='phase8_intent_evidence' ORDER BY seq").fetchall(); items=[json.loads(x[0]) for x in rows]; unresolved={x[0] for x in db.execute("SELECT op_key FROM external_ops WHERE status IN ('started','unknown')")}; db.commit(); print(json.dumps({"ok":True,"items":[x for x in items if x.get("operation_key") in unresolved]})); return
       row=db.execute("SELECT token FROM writer_lease WHERE id=1").fetchone()
@@ -149,7 +156,46 @@ def main():
           db.execute("INSERT INTO writer_audit(event,token,detail) VALUES('continuous_sync_policy_operator_confirmed',?,?)",(a.token,canonical({"action":a.action,"policy_id":cfg["policy_id"],"identity_assurance":"local_operator_unverified"})))
         db.commit(); print(json.dumps({"ok":True,"policy_id":cfg["policy_id"],"action":a.action})); return
       if not a.token or not row or row[0]!=a.token: raise RuntimeError("active_writer_lease_required")
+      if a.action=="draft-state-put":
+        import base64
+        if not a.request_id or not a.record_b64: raise RuntimeError("draft_state_record_required")
+        record=json.loads(base64.urlsafe_b64decode(a.record_b64+"="*((4-len(a.record_b64)%4)%4)).decode("utf-8"))
+        if not isinstance(record,dict) or record.get("request_id")!=a.request_id or not re.fullmatch(r"[0-9a-f]{64}",str(record.get("input_hash",""))) or len(canonical(record).encode("utf-8"))>1000000: raise RuntimeError("draft_state_record_invalid")
+        db.execute("INSERT INTO writer_audit(event,token,detail) VALUES('invoice_draft_generation_state',?,?)",(a.token,canonical({"request_id":a.request_id,"input_hash":record["input_hash"],"record":record})))
+        db.commit(); print(json.dumps({"ok":True})); return
       if a.action=="release": db.execute("DELETE FROM writer_lease WHERE id=1 AND token=?",(a.token,)); db.execute("INSERT INTO writer_audit(event,token,detail) VALUES('lease_released',?, '{}')",(a.token,)); db.commit(); print(json.dumps({"ok":True})); return
+      if a.action.startswith("external-"):
+        if not a.evidence_b64: raise RuntimeError("external_operation_evidence_required")
+        import base64
+        e=json.loads(base64.urlsafe_b64decode(a.evidence_b64+"="*((4-len(a.evidence_b64)%4)%4)).decode("utf-8"))
+        required={"request_id","operation_key","method","target","payload_hash","approval_id","doc_key","approval_scope"}
+        if not isinstance(e,dict) or not required.issubset(e): raise RuntimeError("external_operation_evidence_invalid")
+        if not re.fullmatch(r"[a-z]+\.(?:quotation|invoice)\.create|notion\.page\.(?:create|update)",str(e["method"])) or not re.fullmatch(r"[0-9a-f]{64}",str(e["payload_hash"])): raise RuntimeError("external_operation_scope_invalid")
+        approval=e["approval_scope"]
+        expected={"approved":True,"approval_id":e["approval_id"],"request_id":e["request_id"],"operation":e["method"],"target":e["target"],"payload_sha256":e["payload_hash"],"doc_key":e["doc_key"]}
+        if not isinstance(approval,dict) or any(approval.get(k)!=v for k,v in expected.items()) or not isinstance(approval.get("expires_at"),str): raise RuntimeError("external_operation_approval_scope_invalid")
+        if a.action=="external-intent" and not datetime.fromisoformat(approval["expires_at"].replace("Z","+00:00"))>datetime.now(timezone.utc): raise RuntimeError("external_operation_approval_expired")
+        key=e["operation_key"]; prior=db.execute("SELECT request_id,method,target,payload_hash,status,result_id FROM external_ops WHERE op_key=?",(key,)).fetchone()
+        if a.action=="external-intent":
+          if prior: raise RuntimeError("external_operation_already_recorded")
+          unresolved=db.execute("SELECT status FROM external_ops WHERE doc_key=? AND status IN ('started','unknown') LIMIT 1",(e["doc_key"],)).fetchone()
+          if unresolved: raise RuntimeError("external_document_unresolved_operation")
+          db.execute("INSERT INTO external_ops(op_key,request_id,method,target,payload_hash,status,approval_id,doc_key) VALUES(?,?,?,?,?,'started',?,?)",(key,e["request_id"],e["method"],e["target"],e["payload_hash"],e["approval_id"],e["doc_key"]))
+          db.execute("INSERT INTO writer_audit(event,token,detail) VALUES('external_operation_intent',?,?)",(a.token,canonical({"operation_key":key,"request_id":e["request_id"],"payload_hash":e["payload_hash"]})))
+        else:
+          if not prior or prior[0]!=e["request_id"] or prior[1]!=e["method"] or prior[2]!=e["target"] or prior[3]!=e["payload_hash"]: raise RuntimeError("external_operation_identity_mismatch")
+          expected_status="started" if a.action in ("external-finish","external-unknown") else "unknown"
+          if prior[4]!=expected_status: raise RuntimeError("external_operation_transition_invalid")
+          if a.action=="external-finish":
+            if not isinstance(e.get("result_id"),str) or not e["result_id"]: raise RuntimeError("external_operation_result_id_required")
+            db.execute("UPDATE external_ops SET status='succeeded',result_id=? WHERE op_key=? AND status='started'",(e["result_id"],key)); event="external_operation_finished"
+          elif a.action=="external-unknown":
+            db.execute("UPDATE external_ops SET status='unknown',error='outcome_unknown' WHERE op_key=? AND status='started'",(key,)); event="external_operation_unknown"
+          else:
+            if e.get("candidate_count")!=1 or e.get("readback_verified") is not True or e.get("observed_payload_hash")!=e["payload_hash"] or not isinstance(e.get("result_id"),str) or not e["result_id"]: raise RuntimeError("external_operation_reconcile_invalid")
+            db.execute("UPDATE external_ops SET status='succeeded',result_id=?,error=NULL WHERE op_key=? AND status='unknown'",(e["result_id"],key)); event="external_operation_reconciled"
+          db.execute("INSERT INTO writer_audit(event,token,detail) VALUES(?,?,?)",(event,a.token,canonical({"operation_key":key,"result_id":e.get("result_id"),"payload_hash":e["payload_hash"]})))
+        db.commit(); print(json.dumps({"ok":True,"action":a.action})); return
       if not a.evidence_b64: raise RuntimeError("phase8_evidence_required")
       import base64
       e=json.loads(base64.urlsafe_b64decode(a.evidence_b64+"="*((4-len(a.evidence_b64)%4)%4)).decode("utf-8")); required={"request_id","plan_hash","operation_key","action","method","datasource","page_id","properties","property_allowlist","page_allowlist","operation_hash","operation","plan","operation_index","source_line_id","approval_id","registered_identity","registered_identity_hash"}

@@ -1,13 +1,40 @@
-# Deployment setup (candidate)
+# Host integration and setup
 
-This guide describes the configuration and host responsibilities for the extracted registered-sync flow. The repository does not yet provide a one-command production installer or a platform-specific credential-store integration.
+This candidate provides reusable workflow code and API/ledger contracts. The adopting project supplies credential storage, approval UI, OAuth redirect handling, task scheduling and any external notification destination. No production installer or Windows Credential Manager adapter is included.
 
-1. Create a project-local copy of `config.example.json` outside the repository and replace all placeholders. Map the company's freee ID, quotation/invoice header and line data sources, relation property names, Notion property names and types, allowed actions/properties, registration/synced state labels, and line reissue key fields.
-2. Keep the local config and SQLite path in a user-protected runtime directory. The existing `.gitignore` excludes local configs, credentials, database files, logs, state, and Python caches.
-3. Provide `notionTokenProvider` and `freeeTokenProvider` callbacks backed by the deployment host's credential store. Tokens must not enter config, process logs, or Git. OAuth enrollment and refresh are still host integration work.
-4. Before the first run, the operator reviews the complete scope printed from the local config and activates the matching persistent policy in an interactive local terminal. Use `createGateLedger` to acquire a lease, call `approveContinuousSyncPolicy({lease})`, then release the lease in a `finally` block. The gate inherits the local terminal, displays the scope and confirmation phrase, and requires the operator to enter it. The policy is stored as the existing audit events; no extra policy table is created. A changed company, data source, action, property allowlist, or document limit no longer matches the stored scope and stops the runner.
-5. Compose `createFormalSyncService` with the config, config path, protected SQLite path, token providers, and API transports. Use `run()` for the sequential registered-document batch. Use `recoverUnknown()` only to reconcile recorded outcomes by read-back; it does not replay mutations.
-6. On every run, inspect the emitted summary and sanitized local logs. An unknown operation requires manual investigation and remains blocked until a unique read-back proves its outcome. Do not edit or delete unresolved ledger rows to force a retry.
-7. For initial rollout, use a test workspace and a separate temporary SQLite database. Confirm scope, inventory, line relations, total amounts/taxes, monitoring, backup, and a restoration procedure before considering any live write capability.
+## 1. Prepare an isolated project
 
-The isolated E2E exercises this composition with fake HTTP and temporary SQLite. It does not establish a live OAuth credential provider, production key storage, deployment-level permission controls, scheduler, or operating procedure for a specific company. Those pieces must be reviewed and integrated by the adopting host before production use.
+1. Copy `config.example.json` to a protected directory outside the Git checkout. Replace placeholders with the company's freee ID, four document/line data sources, relation names, Notion property names and types, local policy ID, allowed actions/properties, matching keys and invoice-draft mapping.
+2. Store the shared SQLite file and sanitized logs beside the protected runtime configuration. Back up the SQLite file while no run is active. Do not copy production credentials or customer records into fixtures.
+3. Use a dedicated Notion integration with only the required data sources shared, and a freee API credential limited to the read/write operations the host actually needs. Registered synchronization uses freee GET and Notion writes; first registration additionally requires freee POST.
+
+## 2. Provide OAuth token storage
+
+Construct `createOAuthTokenProvider` separately for Notion and freee. Supply each provider a `store` implementing:
+
+- `load()` and `save(tokenRecord)` backed by a host-protected credential store;
+- `withLock(async callback)`, a cross-process exclusive lock around refresh-token read/rotation. Re-read the token after acquiring the lock, as the provider does.
+
+Do not put client secrets or token values in JSON configuration, command-line arguments, environment dumps, logs, SQLite audit records, or Git. The host owns the redirect URI and authorization-code capture. `exchangeCode({code,redirectUri})` exchanges a one-time code; `getAccessToken()` returns a current token or refreshes under the store lock. The candidate does not implement the browser callback or Credential Manager storage adapter. A missing/invalid refresh token fails with a sanitized error and requires host-managed reauthorization.
+
+## 3. Configure and approve registered synchronization
+
+Create the formal API ports and service from `src/formal-api-ports.mjs` and `src/formal-sync.mjs`, pointing `configPath` and `dbPath` to protected local files. Before first apply, the operator must review and approve the exact configured scope using the host's normal interactive authorization surface. Call the gate's policy-approval operation while holding its SQLite lease, then release in `finally`. The gate records the scope in the existing audit table; any company, database, action, property or batch-limit mismatch stops the run.
+
+Use the same service for single-document and sequential batch sync. It fetches all plans before its first mutation, logs operation intent, performs the exact scoped Notion operation, GET-verifies it, and releases its lease. Use `recoverUnknown()` only for exact read-back reconciliation. It never replays a mutation.
+
+## 4. First registration and invoice draft generation
+
+For a first quotation or invoice registration, prepare an immutable request containing the company/partner/document identity, exact freee body, existing Notion header/line page IDs, data sources and property patches. The host must present this scope to the user and return a short-lived operation authorization through `approvalProvider`. Run `runFirstRegistration` with the same `createGateLedger` ledger, API ports, and a duplicate-check `preflight`. The function rechecks preflight after approval, writes the freee POST intent before POST, GET-verifies the result, and updates only the supplied existing Notion pages. If POST outcome is uncertain, stop and reconcile by a unique, identity-verified GET; never post again automatically.
+
+For quote-to-invoice draft generation, map the draft header/line data sources, typed properties and source relations under `notion.invoiceDraft`. Use `createLedgerBackedInvoiceDraftRuntime` with the same formal Notion API port, ledger, freee GET port, and operation-scoped approval provider. A generation request ID must remain stable on resume. A conflicting payload under the same request ID is rejected.
+
+## 5. Monitoring and recovery
+
+Keep `src/local-monitor.mjs` events sanitized. The host's notification sink should alert only for failure or unknown, suppress duplicate alerts by event fingerprint, and never trigger a business operation. Logs and notification state stay outside Git. A notification error must be recorded separately and must not cause a business mutation retry.
+
+If a process exits, inspect the ledger status and exact target via API GET before restarting. A live lease blocks a second run. A stale lease is reclaimed only when the same host can confirm the owner process has exited. An operation marked `started` or `unknown` remains blocked until exact read-back confirms one result; missing or multiple candidates require manual investigation.
+
+## 6. Rollout checks
+
+Start with fake API transports and a new temporary SQLite file. Verify scope, inventory, totals/tax, relations, one mapped project, then a second distinct mapping, notification sink, restart and restore procedures. Before live rollout, separately review API app permissions, credential-store implementation, callback handling, operator authorization, network access, task account, working directory, schedule, backup, alert destination and rollback. This candidate's tests do not certify those deployment-specific controls.

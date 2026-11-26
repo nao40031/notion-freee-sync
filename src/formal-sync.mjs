@@ -80,6 +80,7 @@ function createGateLedger({dbPath,configPath,gatePath=resolve(HERE,"formal-sqlit
   const interactive=(action,lease)=>{if(!lease)throw Error("formal_sync_policy_lease_required");const p=spawnSync(python,["-X","utf8",gatePath,action,"--db",dbPath,"--config",configPath,"--token",lease],{stdio:"inherit",windowsHide:false,timeout:300000});if(p.error||p.status!==0)throw Error("formal_sync_policy_operator_rejected");return run("policy-status").policy;};
   const currentPolicy=()=>{const policy=run("policy-status").policy;return policy?.status==="active"?{active:policy}:{active:null};};
   const enc=e=>Buffer.from(JSON.stringify(e),"utf8").toString("base64url");
+  const external=(action,lease,evidence)=>{if(!lease||!evidence)throw Error("external_operation_gate_evidence_required");run(`external-${action}`,["--token",lease,"--evidence-b64",enc(evidence)]);};
   return Object.freeze({
     async acquire(){return run("acquire",["--owner-pid",String(process.pid)]).token;},
     async release(token){run("release",["--token",token]);},
@@ -92,6 +93,12 @@ function createGateLedger({dbPath,configPath,gatePath=resolve(HERE,"formal-sqlit
     async phase8Finish({lease,evidence}){run("phase8-finish",["--token",lease,"--evidence-b64",enc(evidence)]);},
     async phase8Unknown({lease,evidence}){run("phase8-unknown",["--token",lease,"--evidence-b64",enc(evidence)]);},
     async phase8Reconcile({lease,evidence}){run("phase8-reconcile",["--token",lease,"--evidence-b64",enc(evidence)]);},
+    async externalIntent({lease,evidence}){external("intent",lease,evidence);},
+    async externalFinish({lease,evidence}){external("finish",lease,evidence);},
+    async externalUnknown({lease,evidence}){external("unknown",lease,evidence);},
+    async externalReconcile({lease,evidence}){external("reconcile",lease,evidence);},
+    async loadInvoiceDraftState(requestId){return run("draft-state-get",["--request-id",String(requestId)]).record;},
+    async saveInvoiceDraftState({lease,requestId,record}){if(!lease||record?.request_id!==requestId)throw Error("draft_state_lease_and_identity_required");run("draft-state-put",["--token",lease,"--request-id",String(requestId),"--record-b64",enc(record)]);},
   });
 }
 

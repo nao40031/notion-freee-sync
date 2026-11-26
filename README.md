@@ -1,32 +1,36 @@
-# Notion ↔ freee Sync Core (isolated integration candidate)
+# Notion × freee Sync Core
 
-This repository contains reusable synchronization components for quotations and invoices that are already registered in freee and linked to existing Notion pages. It is an isolated development candidate. It is not a production installer and has not been connected to a live workspace.
+Reusable JavaScript and Python components for quotation and invoice workflows between Notion and freee. This repository is an isolated release candidate: the included tests use fictional projects, fake API transports, and temporary SQLite databases. It has not been connected to a live Notion or freee workspace and is not a ready-made production installer.
 
-## Integrated registered-document flow
+## Included workflows
 
-`createFormalSyncService` composes the existing API clients, registered-document inventory, the Private Phase 8 synchronization planner, the operation-scoped Notion transport, a SQLite lease/audit gate, read-back verification, recovery, and the local monitor. The single-document and batch execution use the same sequential runner. It uses the local monitor by default; a deployment can inject another event sink. Project identifiers, Notion data sources, property names/types, approved operations, and line matching rules come from a local configuration file.
+### Registered-document synchronization
 
-Before any mutation, the runner verifies that the active SQLite policy exactly matches the configured company, data sources, document types, operations, property allowlists, and batch limit; enumerates registered records; validates their page/data-source/relation identities; retrieves all freee and Notion snapshots; and prepares every plan. It then applies only planned operations. Each operation is recorded before the API call and confirmed by a Notion GET. An uncertain result is reconciled by read-back; it is never resent automatically. A lease prevents concurrent runs.
+`createFormalSyncService` composes the Notion/freee API clients, configured inventory, the baseline-derived sync planner, operation-scoped Notion transport, the SQLite lease/audit gate, read-back, unknown reconciliation, and local event monitor. Single-document and sequential batch runs use the same planner and writer path.
 
-The standard Notion client is given a short-lived operation-specific scope for each planned write. The persistent policy is recorded in the existing SQLite audit events and must first be approved in the local Windows terminal by its operator. No separate policy table or journal is added. That local policy is a deployment control; it does not claim cryptographic identity or replace the host's normal permission controls.
+Before writing, the runner verifies the active local policy scope, enumerates only registered quotations and invoices, validates IDs, data sources, relations and totals, fetches every source snapshot, and builds the full run plan. It then records each operation before calling Notion, verifies the result with GET, and stops on an uncertain result. Unknown mutations are reconciled by read-back; they are not sent again. The workflow does not create document headers, hard-delete pages, or write business data to freee.
 
-## Scope and current limits
+### First quotation/invoice registration
 
-- Supports registered quotation and invoice synchronization from freee to existing Notion records.
-- Supports header updates, line updates/creation, and archiving removed lines when explicitly included in policy.
-- Does not create document headers, hard-delete pages, or write business data to freee.
-- Uses the copied Private baseline synchronization planner and a focused extraction of its SQLite operation-gate contract.
-- API tokens are supplied by host-provided token-provider functions. OAuth enrollment/refresh setup and production credential-store integration are deployment work.
-- The test suite uses fake HTTP endpoints and temporary SQLite databases only. No live API or production database has been used from this candidate.
-- Initial quotation/invoice registration, quote-to-invoice draft generation, unattended scheduling, and production monitoring deployment are not packaged as a complete installable application yet.
+`runFirstRegistration` supports one explicitly approved quotation or invoice POST to freee, followed by GET verification and ID registration on the supplied existing Notion header and line pages. The host supplies the operation-specific approval provider, duplicate preflight, API ports, and the same SQLite ledger used by registered synchronization. A POST with an uncertain response is recorded as unknown and is never retried. A separate read-only reconciliation entry can bind a unique GET result to the original request.
 
-## Configuration
+### Quote-to-invoice draft generation
 
-Copy `config.example.json` outside the repository and replace every placeholder with the target project's company ID, data-source IDs, relation names, property names/types, and approved policy values. Keep local credentials, config, SQLite databases, event logs, and notification state outside Git. The example is a schema guide; it is intentionally not runnable until all placeholders and property allowlists are configured.
+`generateInvoiceDraft` validates source identity, line arithmetic, tax rates, totals and rounding before generating an independent invoice draft. `createLedgerBackedInvoiceDraftRuntime` binds it to the shared SQLite lease and external-operation ledger, mapped Notion properties, request keys, Relations, operation-scoped approval, and read-back. Unknown creates are resolved only when a unique matching page can be verified; otherwise processing stops for manual recovery.
 
-The configuration scope must exactly match the active SQLite policy. Changing a company, database, action, property, or batch bound requires a fresh policy approval. Never widen the configuration to make a failed plan pass.
+### OAuth and operation support
 
-## Isolated checks
+`createOAuthTokenProvider` exchanges authorization codes and refreshes tokens through a host-owned secure token store. The store must implement a cross-process `withLock` around refresh-token reads and writes; this is needed when a scheduled run and manual run can overlap. The repository does not ship a platform credential-store adapter or an interactive callback server. `src/local-monitor.mjs` provides sanitized local events and a notification sink port; a host chooses and secures the actual destination.
+
+## Project configuration
+
+Copy `config.example.json` outside the repository and supply the target company's freee ID, Notion data sources, property names/types, relation mappings, state values, policy scope, and invoice-draft mappings. Keep credentials, local configuration, SQLite, logs and notification state outside Git. The sample contains placeholders only. A host must provide a protected config/SQLite path, token store, OAuth registration flow, and explicit operation/policy approval interface.
+
+The persistent operating policy must exactly match the configured company, databases, document types, actions, property allowlists and batch limit. Policy approval is an operational authorization boundary; it is not a cryptographic identity assertion and does not replace the host OS or API permissions.
+
+## Local checks
+
+Requires Node.js with built-in `node:test` and Python 3. No third-party runtime package is required by the core candidate.
 
 ```sh
 npm test
@@ -34,8 +38,14 @@ npm run test:formal-sync
 npm run scan
 ```
 
-`formal-flow-e2e.test.mjs` runs the integrated runner against the real Notion/freee client code pointed at fake HTTP endpoints and two independent synthetic project mappings. It uses real temporary SQLite files to verify mixed quotation/invoice batch sync, line ID replacement, added/archived lines, no-op, scope mismatch rejection, operation auditing, read-back, restart recovery, unknown-stop/no-replay, and fake error notification. Existing unit tests cover the reusable planner, API clients, batch coordinator, and local monitor.
+The integrated registered-sync E2E exercises two fictional project mappings. The registration suite exercises first quotation registration with a second mapping, POST-unknown reconciliation, quote-to-invoice generation, OAuth refresh token rotation, and the shared ledger-backed draft writer. All external requests are faked; each ledger test uses a temporary SQLite database.
 
-## Release status
+## Security and verification limits
 
-Not published. Review the full source and Git history, third-party notices, license rights, project-specific configuration, and a clean-install procedure before any public release. No live credentials, company/data-source/page IDs, transaction examples, runtime logs, or production SQLite files belong in this repository.
+- No real API calls, live OAuth, Windows credential store, scheduled task, production SQLite, or external email delivery is verified by this candidate.
+- A host must implement the token store's cross-process lock, secure secret storage, redirect/callback handling, regular operator authorization, notifications, and scheduler lifecycle.
+- Initial freee registration and invoice draft creation require an explicit host-provided operation approval. Registered sync requires a separately approved bounded operating policy.
+- Never retry a create after an unknown result. Read back and reconcile one exact candidate; otherwise stop.
+- Do not widen policy, targets, data sources, properties, or actions just to make a plan pass.
+
+See [setup](docs/setup.md), [design](docs/design.md), [function matrix](docs/function-matrix.md), [Private path map](docs/private-formal-path-map.md), and [release checklist](docs/release-checklist.md). `LICENSE.preview` is a proposed MIT notice and is not a confirmed rights clearance.

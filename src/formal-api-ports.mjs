@@ -1,4 +1,4 @@
-import {createFreeeReadClient,createNotionClient} from "./api-clients.mjs";
+import {createFreeeReadClient,createFreeeRegistrationClient,createNotionClient} from "./api-clients.mjs";
 import {createFormalRegisteredDocumentLister} from "./formal-inventory.mjs";
 
 function relationIds(page,name){const p=page?.properties?.[name];if(p?.type!=="relation"||p.has_more)throw Error("formal_api_relation_incomplete");return(p.relation||[]).map(x=>String(x.id));}
@@ -8,6 +8,8 @@ function encodeProperties(values,config){const inverse=Object.fromEntries(Object
   if(type==="title"||type==="rich_text")return[name,{[type]:value==null?[]:[{type:"text",text:{content:String(value)}}]}];
   if(type==="select"||type==="status")return[name,{[type]:value==null?null:{name:String(value)}}];
   if(type==="number")return[name,{number:value==null?null:Number(value)}];
+  if(type==="checkbox")return[name,{checkbox:Boolean(value)}];
+  if(type==="relation"){if(!Array.isArray(value))throw Error("formal_api_relation_value_invalid");return[name,{relation:value.map(id=>({id:String(id)}))}];}
   throw Error("formal_api_property_type_unsupported");
 }));}
 
@@ -22,6 +24,7 @@ export function createFormalApiPorts({config,notionTokenProvider,freeeTokenProvi
   const readNotion=createNotionClient({tokenProvider:notionTokenProvider,apiVersion,fetchImpl:notionFetch,baseUrl:notionBaseUrl});
   const inventory=createFormalRegisteredDocumentLister({queryDataSource:readNotion.queryDataSource,config});
   const freeeRead=createFreeeReadClient({tokenProvider:freeeTokenProvider,fetchImpl:freeeFetch,baseUrl:freeeBaseUrl});
+  const freeeRegistration=createFreeeRegistrationClient({tokenProvider:freeeTokenProvider,fetchImpl:freeeFetch,baseUrl:freeeBaseUrl});
   const writeClient=({operation,dataSourceId,pageId=null,propertyNames=[]})=>createNotionClient({tokenProvider:notionTokenProvider,apiVersion,fetchImpl:notionFetch,baseUrl:notionBaseUrl,
     writeScope:{enabled:true,operations:[operation],dataSourceIds:[dataSourceId],pageIds:pageId?[pageId]:[],properties:propertyNames,allowCreate:operation==="create_page"}});
   async function readLinePages(documentType,sourceLineId,parentId){
@@ -44,6 +47,7 @@ export function createFormalApiPorts({config,notionTokenProvider,freeeTokenProvi
     async archivePage({pageId,datasource,approvalProvider}){await approvalProvider.assertApproved({action:"archive",page_id:pageId,datasource,properties:{}});return writeClient({operation:"archive_page",dataSourceId:datasource,pageId}).archivePage(pageId,datasource);},
     async findCreateOutcome({requestId,sourceLineId,parentId,documentType}){void requestId;return readLinePages(documentType,sourceLineId,parentId);}
   });
-  const freee=Object.freeze({async getDocument({documentType,companyId,documentId}){return freeeRead.getDocument(documentType,companyId,documentId);}});
+  const freee=Object.freeze({async getDocument({documentType,companyId,documentId}){return freeeRead.getDocument(documentType,companyId,documentId);},
+    async createDocument({documentType,companyId,body}){return freeeRegistration.createDocument(documentType,companyId,body);}});
   return Object.freeze({notion,freee});
 }
