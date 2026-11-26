@@ -129,6 +129,9 @@ class Ledger:
             run = db.execute("SELECT status FROM sync_run WHERE request_id=?", (request_id,)).fetchone()
             if not run or run["status"] != "running":
                 raise LedgerError("run_not_active")
+            other = db.execute("SELECT status FROM sync_operation WHERE operation_key=? AND request_id<>? AND status IN ('intent','unknown') LIMIT 1", (operation_key, request_id)).fetchone()
+            if other:
+                raise LedgerError("operation_unresolved_in_another_run")
             prior = db.execute("SELECT payload_hash,status FROM sync_operation WHERE request_id=? AND operation_key=?", (request_id, operation_key)).fetchone()
             if prior:
                 if prior["payload_hash"] != payload_hash:
@@ -165,6 +168,9 @@ class Ledger:
             row = db.execute("SELECT status FROM sync_run WHERE request_id=?", (request_id,)).fetchone()
             if not row or row["status"] != "running":
                 raise LedgerError("run_not_active")
+            pending = db.execute("SELECT 1 FROM sync_operation WHERE request_id=? AND status IN ('intent','unknown','failed') LIMIT 1", (request_id,)).fetchone()
+            if status == "complete" and pending:
+                raise LedgerError("unresolved_operations")
             db.execute("UPDATE sync_run SET status=?,finished_at=? WHERE request_id=?", (status, now, request_id))
             db.execute("DELETE FROM sync_lease WHERE request_id=?", (request_id,))
             self._audit(db, request_id, "run_" + status, {}, now)

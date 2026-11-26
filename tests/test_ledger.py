@@ -26,6 +26,12 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(restarted.get_operation("run-1", "page:1")["status"], "unknown")
         restarted.finish_run("run-1", "unknown", now=104)
         restarted.begin_run("run-2", "other-scope", now=105)
+        restarted.acquire_lease("run-2", now=105)
+        with self.assertRaisesRegex(LedgerError, "operation_unresolved_in_another_run"):
+            restarted.reserve_operation("run-2", "page:1", "body-hash", now=106)
+        self.assertEqual(restarted.reserve_operation("run-2", "page:2", "other-hash", now=106), "intent")
+        with self.assertRaisesRegex(LedgerError, "unresolved_operations"):
+            restarted.finish_run("run-2", "complete", now=107)
 
     def test_lease_excludes_a_second_run_and_is_released_at_completion(self):
         self.ledger.acquire_lease("run-1", now=100)

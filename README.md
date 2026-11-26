@@ -12,6 +12,7 @@ The package has no embedded service credentials, company/data-source/page IDs, o
 - Ambiguous line identity and inconsistent totals stop before any write.
 - Batch mode can pre-plan the whole snapshot and enforce no-op-only acceptance before calling a writer.
 - The optional SQLite ledger persists run scope, leases, operation intents, audit events and unknown outcomes. Unknown operations are not replayed.
+- The optional local monitor records events and can call a deployment-provided notification function; its state files must remain outside Git.
 - Production credentials, approved operating scope, binding the ledger to every external mutation, and the platform's execution/permission controls remain deployment responsibilities.
 
 ## Local checks
@@ -24,4 +25,4 @@ npm run scan
 
 ## Status
 
-This candidate is not published. Its structure and isolated tests have been reviewed. No live API has been called from this folder. Initial document registration, OAuth lifecycle, quote-to-invoice draft generation, production orchestration, and scheduler integration are not yet packaged as a runnable application.
+This candidate is not published. Its structure and isolated tests have been reviewed. No live API has been called from this folder. The ledger is not connected to the writer or batch runner. Initial document registration, OAuth lifecycle, quote-to-invoice draft generation, production orchestration, recovery and scheduler integration are not yet packaged as a runnable application.
