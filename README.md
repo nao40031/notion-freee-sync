@@ -44,6 +44,10 @@ npm run scan
 
 The integrated registered-sync E2E exercises two fictional project mappings. The registration suite exercises first quotation registration with a second mapping, POST-unknown reconciliation, quote-to-invoice generation, OAuth refresh token rotation, and the shared ledger-backed draft writer. The host-integration suite covers fake-DPAPI storage and lock contention, callback-to-token-exchange composition, sanitized Gmail API request construction, and Task Scheduler plan generation. The callback listener and actual Windows DPAPI/ACL behavior are not exercised against the host OS. All external API requests are faked; each ledger test uses a temporary SQLite database.
 
+## License
+
+MIT. Copyright (c) 2026 Oshino. See [LICENSE](LICENSE) and [third-party notices](THIRD-PARTY-NOTICES.md).
+
 ## Security and verification limits
 
 - No real API calls, live OAuth consent, Windows DPAPI/ACL under an adopter account, actual Task Scheduler registration/execution, production SQLite, or external email delivery is verified by this candidate.
@@ -52,4 +56,4 @@ The integrated registered-sync E2E exercises two fictional project mappings. The
 - Never retry a create after an unknown result. Read back and reconcile one exact candidate; otherwise stop.
 - Do not widen policy, targets, data sources, properties, or actions just to make a plan pass.
 
-See [setup](docs/setup.md), [design](docs/design.md), [function matrix](docs/function-matrix.md), [Private path map](docs/private-formal-path-map.md), and [release checklist](docs/release-checklist.md). `LICENSE.preview` is a proposed MIT notice and is not a confirmed rights clearance.
+See [setup](docs/setup.md), [design](docs/design.md), [function matrix](docs/function-matrix.md), [Private path map](docs/private-formal-path-map.md), and [release checklist](docs/release-checklist.md).
