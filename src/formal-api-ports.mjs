@@ -47,7 +47,7 @@ export function createFormalApiPorts({config,notionTokenProvider,freeeTokenProvi
     async archivePage({pageId,datasource,approvalProvider}){await approvalProvider.assertApproved({action:"archive",page_id:pageId,datasource,properties:{}});return writeClient({operation:"archive_page",dataSourceId:datasource,pageId}).archivePage(pageId,datasource);},
     async findCreateOutcome({requestId,sourceLineId,parentId,documentType}){void requestId;return readLinePages(documentType,sourceLineId,parentId);}
   });
-  const freee=Object.freeze({async getDocument({documentType,companyId,documentId}){return freeeRead.getDocument(documentType,companyId,documentId);},
+  const freee=Object.freeze({async getDocument({documentType,companyId,documentId}){const response=await freeeRead.getDocument(documentType,companyId,documentId);return response?.[documentType]??response?.data?.[documentType]??response?.data??response;},
     async createDocument({documentType,companyId,body}){return freeeRegistration.createDocument(documentType,companyId,body);}});
   return Object.freeze({notion,freee});
 }

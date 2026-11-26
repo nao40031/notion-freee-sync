@@ -13,7 +13,7 @@
 7. Stop on unknown. Recovery only performs read-back and reconciliation; it never repeats a mutation.
 8. Emit sanitized batch/document events to the local monitor and release the lease.
 
-The sync planner is the Private baseline's `phase8_sync_planner.py`. Its operation format is consumed by the generic runtime; project-specific values are supplied through `config.json`. The gate uses the existing `writer_lease`, `writer_audit`, and `external_ops` tables. Active/revoked operating policy is represented by the existing `continuous_sync_policy_enabled` / `continuous_sync_policy_revoked` audit events; no policy table or separate journal is added.
+The sync planner consumes normalized, project-mapped inputs and returns a bounded operation plan. Project-specific values are supplied through `config.json`. The gate uses the `writer_lease`, `writer_audit`, and `external_ops` tables. Active/revoked operating policy is represented by audit events; no separate policy table or journal is added.
 
 ## Authorization and data safety
 

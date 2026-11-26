@@ -56,8 +56,13 @@ test("safeGet retries a bounded transient response",async()=>{
 test("Notion source query is read-only discovery",async()=>{
  const methods=[];
  const client=createNotionClient({tokenProvider:async()=>"synthetic-token",fetchImpl:async(url,options)=>{
-  methods.push(options.method);return {ok:true,status:200,json:async()=>({results:[]})};
+  methods.push({method:options.method,version:options.headers["Notion-Version"]});return {ok:true,status:200,json:async()=>({results:[]})};
  }});
  await client.queryDataSource("source-1",{page_size:10});
- assert.deepEqual(methods,["POST"]);
+ assert.deepEqual(methods,[{method:"POST",version:"2026-03-11"}]);
+});
+
+test("Notion API version remains explicitly configurable",async()=>{
+ const seen=[];const client=createNotionClient({tokenProvider:async()=>"synthetic-token",apiVersion:"2025-09-03",fetchImpl:async(_url,options)=>{seen.push(options.headers["Notion-Version"]);return{ok:true,status:200,json:async()=>({results:[]})};}});
+ await client.queryDataSource("source-1",{});assert.deepEqual(seen,["2025-09-03"]);
 });

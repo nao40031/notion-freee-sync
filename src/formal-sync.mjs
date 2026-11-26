@@ -1,5 +1,5 @@
 /**
- * Registered-document sync, extracted from the Private Phase 8 formal path:
+ * Registered-document sync service for configured quotation and invoice flows:
  * pre-plan the bounded inventory, hold one SQLite lease, persist every
  * operation intent, invoke the scoped Notion transport, GET read-back, and
  * reconcile an uncertain response without replaying the mutation.
@@ -115,6 +115,12 @@ function binder(plan){const used=new Set();return Object.freeze({async assertApp
 
 function propertyMatch(expected,observed,config){const inverse=Object.fromEntries(Object.entries(config.properties).map(([logical,name])=>[name,logical]));for(const [key,value] of Object.entries(expected||{})){const date=/^date:(.+):start$/.exec(key),name=date?date[1]:key,logical=inverse[name],actual=logical?observed?.[logical]:observed?.[name];if(date&&value==="<set-at-apply-time>"){if(typeof actual!=="string"||!Number.isFinite(Date.parse(actual)))return false;}else if(JSON.stringify(actual)!==JSON.stringify(value))return false;}return true;}
 
+// Use a stable per-run identity so new runs cannot impersonate prior operations.
+export function runScopedSyncRequestId({runId,documentType,freeeId}={}){
+  if(!runId||!allowedTypes.has(documentType)||!/^\d+$/.test(String(freeeId??"")))throw Error("formal_sync_request_identity_invalid");
+  return `continuous:${runId}:${documentType}:${freeeId}`;
+}
+
 /** Inject real or fake API ports; both use this exact runner/writer/ledger path. */
 export function createFormalRegisteredSync({config,configPath,plannerPath=resolve(HERE,"phase8_sync_planner.py"),dbPath,notion,freee,emit=async()=>{},python="python"}={}){
   const cfg=validateConfig(config);if(!configPath||!dbPath||typeof notion?.listRegisteredDocuments!=="function"||typeof notion?.getPage!=="function"||typeof notion?.updatePage!=="function"||typeof notion?.createPage!=="function"||typeof notion?.archivePage!=="function"||typeof freee?.getDocument!=="function")throw Error("formal_sync_ports_required");
@@ -143,7 +149,7 @@ export function createFormalRegisteredSync({config,configPath,plannerPath=resolv
   async function applyPrepared(prepared,lease,runId){
     const {doc,plan,planned}=prepared;if(plan.no_op)return {status:"unchanged",write_count:0,source_hash:planned.source_hash};
     let writesApplied=0;
-    const requestId=`sync:${doc.company_id}:${doc.document_type}:${doc.freee_id}`,scope=makeScope(doc,plan,requestId,cfg),approvalProvider=binder(plan);
+    const requestId=runScopedSyncRequestId({runId,documentType:doc.document_type,freeeId:doc.freee_id}),scope=makeScope(doc,plan,requestId,cfg),approvalProvider=binder(plan);
     const evidenceBase={approval_id:scope.approval_id,approval_mode:"standing-continuous-policy",registered_identity:scope.registered_identity,registered_identity_hash:hash(scope.registered_identity),request_id:requestId,plan_hash:hash(plan),page_allowlist:scope.page_ids};
     for(let index=0;index<plan.operations.length;index++){
       const op=plan.operations[index],action=({update_header:"update",archive_candidate:"archive"}[op.action]||op.action),datasource=op.target,pageId=op.page_id||"",properties=op.properties||{},opHash=hash(op),operationKey=`phase8:${requestId}:${index}:${opHash}`;
@@ -154,6 +160,7 @@ export function createFormalRegisteredSync({config,configPath,plannerPath=resolv
       if(!cfg.policy.allowedActions.includes(action)||(action==="archive"&&!cfg.policy.allowArchiveRemovedLines)||(action==="create"&&!cfg.policy.allowLineCreate))throw Error("formal_sync_policy_action_rejected");
       const evidence={...evidenceBase,operation_key:operationKey,operation_index:index,action,method:`notion.${action}`,datasource,page_id:pageId,properties,property_allowlist:cfg.policy.allowedProperties[isHeader?"header":"line"],operation_hash:opHash,operation:op,plan,source_line_id:String(op.source_line_id||"")};
       const state=await ledger.status(),prior=(state.ops||[]).find(x=>x[0]===operationKey);
+      if(!prior){const unresolved=(state.ops||[]).find(x=>String(x[3])===String(datasource)&&["started","unknown"].includes(x[5])&&String(x[0]).startsWith("phase8:"));if(unresolved)throw Object.assign(Error("formal_sync_datasource_unresolved_operation"),{unknown:true});}
       if(prior){
         if(prior[5]==="succeeded") {const observed=action==="create"?await notion.getPage(prior[6]):await notion.getPage(pageId);if(observed&&propertyMatch(properties,parseProperties(observed,cfg,isLine?doc.document_type:null),cfg))continue;throw Object.assign(Error("formal_sync_completed_readback_mismatch"),{unknown:true});}
         const observed=action==="create"?await notion.findCreateOutcome?.({requestId,sourceLineId:op.source_line_id,parentId:doc.header_page_id}):await notion.getPage(pageId);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused extraction of the Private formal Phase 8 SQLite writer gate.
+"""Focused SQLite writer gate for registered-document synchronization.
 
 Only the registered-document continuous-sync operations are included here.
 Project scope is loaded from a local JSON config supplied on the command line;
@@ -54,7 +54,20 @@ def connect(path):
       CREATE TABLE IF NOT EXISTS writer_lease(id INTEGER PRIMARY KEY CHECK(id=1),token TEXT NOT NULL,host TEXT NOT NULL,pid INTEGER NOT NULL,started_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS writer_audit(seq INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,token TEXT,detail TEXT NOT NULL,at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS external_ops(op_key TEXT PRIMARY KEY,request_id TEXT NOT NULL,method TEXT NOT NULL,target TEXT NOT NULL,payload_hash TEXT NOT NULL,status TEXT NOT NULL,result_id TEXT,error TEXT,at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,approval_id TEXT,doc_key TEXT);
+      CREATE TABLE IF NOT EXISTS approval_requests(request_id TEXT PRIMARY KEY,scope TEXT NOT NULL,payload_hash TEXT NOT NULL,expires_at TEXT NOT NULL,status TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS exceptional_post_retries(original_op_key TEXT PRIMARY KEY,retry_op_key TEXT UNIQUE NOT NULL,request_id TEXT NOT NULL,payload_hash TEXT NOT NULL,approval_id TEXT UNIQUE NOT NULL,preflight_sha256 TEXT NOT NULL,status TEXT NOT NULL,freee_id TEXT,sync_status TEXT NOT NULL DEFAULT 'not_started',at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS corrected_post_retries(root_op_key TEXT PRIMARY KEY,prior_retry_op_key TEXT NOT NULL,retry_op_key TEXT UNIQUE NOT NULL,request_id TEXT NOT NULL,payload_hash TEXT NOT NULL,approval_id TEXT UNIQUE NOT NULL,preflight_sha256 TEXT NOT NULL,status TEXT NOT NULL,freee_id TEXT,sync_status TEXT NOT NULL DEFAULT 'not_started',at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS invoice_post_retries(original_op_key TEXT PRIMARY KEY,retry_op_key TEXT UNIQUE NOT NULL,request_id TEXT NOT NULL,payload_hash TEXT NOT NULL,approval_id TEXT UNIQUE NOT NULL,preflight_sha256 TEXT NOT NULL,status TEXT NOT NULL,freee_id TEXT,sync_status TEXT NOT NULL DEFAULT 'not_started',at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS notion_test_approvals(approval_id TEXT PRIMARY KEY,generation_request_id TEXT NOT NULL,header_database TEXT NOT NULL,line_database TEXT NOT NULL,scope TEXT NOT NULL,plan_hash TEXT NOT NULL,max_pages INTEGER NOT NULL,approver TEXT NOT NULL,approved_at TEXT NOT NULL,state TEXT NOT NULL,result_json TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS notion_host_approvals(approval_id TEXT PRIMARY KEY,generation_request_id TEXT NOT NULL,header_database TEXT NOT NULL,line_database TEXT NOT NULL,scope TEXT NOT NULL,plan_hash TEXT NOT NULL,max_pages INTEGER NOT NULL,approver_id TEXT NOT NULL,approver_label TEXT NOT NULL,host_context_id TEXT NOT NULL,approved_at TEXT NOT NULL,expires_at TEXT NOT NULL,state TEXT NOT NULL,result_json TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     """)
+    # Older databases may predate the two trailing evidence columns.
+    # Add them only when absent; never replace tables or rewrite existing rows.
+    columns={row[1] for row in db.execute("PRAGMA table_info(external_ops)")}
+    if "approval_id" not in columns:
+        db.execute("ALTER TABLE external_ops ADD COLUMN approval_id TEXT")
+    if "doc_key" not in columns:
+        db.execute("ALTER TABLE external_ops ADD COLUMN doc_key TEXT")
     return db
 
 def policy_scope(cfg):
@@ -178,6 +191,15 @@ def main():
         key=e["operation_key"]; prior=db.execute("SELECT request_id,method,target,payload_hash,status,result_id FROM external_ops WHERE op_key=?",(key,)).fetchone()
         if a.action=="external-intent":
           if prior: raise RuntimeError("external_operation_already_recorded")
+          if e["method"] in ("freee.quotation.create","freee.invoice.create"):
+            legacy_target="/quotations" if e["method"]=="freee.quotation.create" else "/invoices"
+            aliases={str(e["doc_key"]),str(e["doc_key"]).rsplit("|",1)[-1]}
+            placeholders=",".join("?" for _ in aliases)
+            recorded=db.execute(f"SELECT status FROM external_ops WHERE method IN (?, 'POST') AND target IN (?, ?) AND doc_key IN ({placeholders}) LIMIT 1",
+              (e["method"],e["target"],legacy_target,*sorted(aliases))).fetchone()
+            if recorded: raise RuntimeError("external_document_operation_already_recorded")
+            unkeyed=db.execute("SELECT 1 FROM external_ops WHERE method='POST' AND target=? AND status IN ('started','unknown') AND (doc_key IS NULL OR trim(doc_key)='') LIMIT 1",(legacy_target,)).fetchone()
+            if unkeyed: raise RuntimeError("external_document_unresolved_identity_blocks_registration")
           unresolved=db.execute("SELECT status FROM external_ops WHERE doc_key=? AND status IN ('started','unknown') LIMIT 1",(e["doc_key"],)).fetchone()
           if unresolved: raise RuntimeError("external_document_unresolved_operation")
           db.execute("INSERT INTO external_ops(op_key,request_id,method,target,payload_hash,status,approval_id,doc_key) VALUES(?,?,?,?,?,'started',?,?)",(key,e["request_id"],e["method"],e["target"],e["payload_hash"],e["approval_id"],e["doc_key"]))

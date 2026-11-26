@@ -9,6 +9,7 @@ import {spawnSync} from "node:child_process";
 import {createFormalSyncService} from "../src/formal-sync.mjs";
 import {createFormalRegisteredDocumentLister} from "../src/formal-inventory.mjs";
 import {createLocalSyncMonitor} from "../src/local-monitor.mjs";
+import {bootstrapExistingLedger} from "./existing-ledger-bootstrap.mjs";
 
 const root=resolve(fileURLToPath(new URL("..",import.meta.url)));
 const norm=x=>String(x??"").replace(/^collection:\/\//,"").replaceAll("-","").toLowerCase();
@@ -71,10 +72,10 @@ function apiPortsForWorld(config,world){const methods=[];const response=(body,st
     if(method!=="GET")return response({error:"freee_write_forbidden_in_fake"},405);return response(await world.freee.getDocument({documentType,companyId:u.searchParams.get("company_id"),documentId:id}));};
   return {notionFetch,freeeFetch,methods};}
 
-test("Private formal sync path: two external mappings, mixed batch, no-op, restart recovery and fail-closed unknown",async()=>{
+test("formal sync path: two external mappings, mixed batch, no-op, restart recovery and fail-closed unknown",async()=>{
   for(const [project,variant] of [["sample-one",false],["sample-two",true]]){
     const dir=await mkdtemp(join(tmpdir(),"formal-flow-")),config=profile(project,variant),configPath=join(dir,"project.json"),dbPath=join(dir,"writer.mock-test.sqlite");
-    await (await import("node:fs/promises")).writeFile(configPath,JSON.stringify(config),"utf8");seedPolicy(dbPath,configPath);assert.ok(!dbTables(dbPath).includes("continuous_sync_policy"),"policy is stored in the existing audit log, not a new table");
+    await (await import("node:fs/promises")).writeFile(configPath,JSON.stringify(config),"utf8");bootstrapExistingLedger(dbPath);seedPolicy(dbPath,configPath);assert.ok(!dbTables(dbPath).includes("continuous_sync_policy"),"policy is stored in the existing audit log, not a new table");
     const world=fakeWorld(config),alerts=[],emailDeliveries=[],logRows=[];let notificationState={};
     const monitor=createLocalSyncMonitor({path:join(dir,"events.jsonl"),statePath:join(dir,"notification-state.json"),append:(path,text)=>logRows.push(JSON.parse(text)),notify:text=>alerts.push(text),emailNotify:async record=>emailDeliveries.push(record),readState:()=>structuredClone(notificationState),writeState:(_path,value)=>{notificationState=structuredClone(value);}});
     // The first request commits its header update but loses the response and
@@ -93,7 +94,7 @@ test("Private formal sync path: two external mappings, mixed batch, no-op, resta
     else resumed=first;
     const beforeNoop=world.mutations;const beforeWrites=world.writePayloads.length;const beforeEvents=world.mutationEvents.length;const noop=await create().run({runId:`${project}-no-op`});assert.equal(noop.status,"complete",JSON.stringify(noop));assert.equal(noop.counts.unchanged,2,JSON.stringify({noop,lastWrites:world.writePayloads.slice(beforeWrites),lastEvents:world.mutationEvents.slice(beforeEvents)}));assert.equal(world.mutations,beforeNoop);
     seedDeadLease(dbPath,configPath);const afterRestart=await create().run({runId:`${project}-after-process-exit`});assert.equal(afterRestart.counts.unchanged,2);assert.equal(world.mutations,beforeNoop);assert.ok(auditEvents(dbPath).includes("stale_lease_reclaimed"));
-    if(variant){world.setQuoteTitle("Changed after baseline");world.setPrecommitFailurePage(world.documents[0].header_page_id);const before=world.mutations;const stopped=await create().run({runId:`${project}-precommit-unknown`});assert.equal(stopped.status,"unknown");assert.equal(world.mutations,before);await assertIncidentDedup();const unresolved=await create().recoverUnknown();assert.equal(unresolved.status,"unknown");assert.equal(unresolved.unresolved.length,1);const replay=await create().run({runId:`${project}-must-not-replay`});assert.equal(replay.status,"unknown");assert.equal(world.mutations,before);}
+    if(variant){world.setQuoteTitle("Changed after baseline");world.setPrecommitFailurePage(world.documents[0].header_page_id);const before=world.mutations;const stopped=await create().run({runId:`${project}-precommit-unknown`});assert.equal(stopped.status,"unknown",JSON.stringify(stopped));assert.equal(world.mutations,before);await assertIncidentDedup();const unresolved=await create().recoverUnknown();assert.equal(unresolved.status,"unknown");assert.equal(unresolved.unresolved.length,1);const replay=await create().run({runId:`${project}-must-not-replay`});assert.equal(replay.status,"unknown");assert.equal(world.mutations,before);}
     const final=gateStatus(dbPath,configPath);assert.equal(final.lease,null);assert.ok(final.ops.length>=5);assert.ok(final.ops.filter(x=>x[5]==="succeeded").length>=5);assert.ok(world.events.some(x=>x.event==="sync_batch_finished"));assert.ok(world.queryCalls>=4);
     assert.equal(emailDeliveries.length,variant?2:1,"fake email sink receives each distinct failure fingerprint");
     await rm(dir,{recursive:true,force:true});

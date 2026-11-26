@@ -1,6 +1,6 @@
 # Notion × freee Sync Core
 
-Reusable JavaScript and Python components for quotation and invoice workflows between Notion and freee. This repository is an isolated release candidate: the included tests use fictional projects, fake API transports, and temporary SQLite databases. It has not been connected to a live Notion or freee workspace and is not a ready-made production installer.
+Reusable JavaScript and Python components for quotation and invoice workflows between Notion and freee. This is the unreleased v0.2.0 candidate. Tests use fictional projects, fake API transports, and temporary SQLite databases. It has not been connected to a live Notion or freee workspace and is not a ready-made production installer.
 
 ## Included workflows
 
@@ -13,6 +13,8 @@ Before writing, the runner verifies the active local policy scope, enumerates on
 ### First quotation/invoice registration
 
 `runFirstRegistration` supports one explicitly approved quotation or invoice POST to freee, followed by GET verification and ID registration on the supplied existing Notion header and line pages. The host supplies the operation-specific approval provider, duplicate preflight, API ports, and the same SQLite ledger used by registered synchronization. A POST with an uncertain response is recorded as unknown and is never retried. A separate read-only reconciliation entry can bind a unique GET result to the original request.
+
+`buildFreeeCreatePayload` maps a normalized, unregistered draft into a quotation or invoice request body, checking company scope, dates, line arithmetic, tax rates, and totals before an adapter can submit it. `buildProjectTaskLines` maps explicitly selected project tasks through configured project and price relations. Both are pure builders: they do not call an API, approve an operation, or write to the ledger. Exact decimal arithmetic is used for money checks and configured whole-currency rounding.
 
 ### Quote-to-invoice draft generation
 
@@ -32,6 +34,8 @@ Copy `config.example.json` outside the repository and supply the target company'
 
 The persistent operating policy must exactly match the configured company, databases, document types, actions, property allowlists and batch limit. Policy approval is an operational authorization boundary; it is not a cryptographic identity assertion and does not replace the host OS or API permissions.
 
+The candidate uses run-scoped synchronization identities, preserves existing ledger tables when opening a database, and does not convert prior approvals or unresolved operations into new authorization. See the public [capability inventory](docs/capability-inventory.md) and [integration compatibility](docs/integration-compatibility.md) for supported interfaces and limits.
+
 ## Local checks
 
 Requires Node.js with built-in `node:test` and Python 3. No third-party runtime package is required by the core candidate.
@@ -42,7 +46,7 @@ npm run test:formal-sync
 npm run scan
 ```
 
-The integrated registered-sync E2E exercises two fictional project mappings. The registration suite exercises first quotation registration with a second mapping, POST-unknown reconciliation, quote-to-invoice generation, OAuth refresh token rotation, and the shared ledger-backed draft writer. The host-integration suite covers fake-DPAPI storage and lock contention, callback-to-token-exchange composition, sanitized Gmail API request construction, and Task Scheduler plan generation. The callback listener and actual Windows DPAPI/ACL behavior are not exercised against the host OS. All external API requests are faked; each ledger test uses a temporary SQLite database.
+The integrated registered-sync E2E exercises two fictional project mappings. The registration suite exercises first quotation registration with a second mapping, POST-unknown reconciliation, quote-to-invoice generation, OAuth refresh token rotation, and the shared ledger-backed draft writer. Draft-builder tests cover quote/invoice payload mapping, invalid scope/totals, explicit task/price relation mapping, and half-cent rounding. The host-integration suite covers fake-DPAPI storage and lock contention, callback-to-token-exchange composition, sanitized Gmail API request construction, and Task Scheduler plan generation. The callback listener and actual Windows DPAPI/ACL behavior are not exercised against the host OS. All external API requests are faked; each ledger test uses a temporary SQLite database.
 
 ## License
 
@@ -56,4 +60,4 @@ MIT. Copyright (c) 2026 Oshino. See [LICENSE](LICENSE) and [third-party notices]
 - Never retry a create after an unknown result. Read back and reconcile one exact candidate; otherwise stop.
 - Do not widen policy, targets, data sources, properties, or actions just to make a plan pass.
 
-See [setup](docs/setup.md), [design](docs/design.md), [function matrix](docs/function-matrix.md), [Private path map](docs/private-formal-path-map.md), and [release checklist](docs/release-checklist.md).
+See [setup](docs/setup.md), [design](docs/design.md), [function matrix](docs/function-matrix.md), [integration compatibility](docs/integration-compatibility.md), and [release checklist](docs/release-checklist.md).

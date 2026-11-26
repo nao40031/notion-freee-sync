@@ -1,7 +1,7 @@
 {
   "freee": { "companyId": "<freee-company-id>" },
   "notion": {
-    "apiVersion": "2022-06-28",
+    "apiVersion": "2026-03-11",
     "documentSources": {
       "quotation": "<quotation-header-data-source-id>",
       "quotationLine": "<quotation-line-data-source-id>",

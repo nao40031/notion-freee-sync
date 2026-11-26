@@ -58,7 +58,7 @@ export function createFreeeRegistrationClient({baseUrl="https://api.freee.co.jp"
   }});
 }
 
-export function createNotionClient({tokenProvider,apiVersion="2022-06-28",fetchImpl=globalThis.fetch,baseUrl="https://api.notion.com/v1",writeScope=null,signal}={}) {
+export function createNotionClient({tokenProvider,apiVersion="2026-03-11",fetchImpl=globalThis.fetch,baseUrl="https://api.notion.com/v1",writeScope=null,signal}={}) {
   if (typeof tokenProvider!=="function" || typeof fetchImpl!=="function") throw new SyncError("notion_client_config_invalid");
   const read=async(path)=>{
     const response=await safeGet(fetchImpl,`${baseUrl}${path}`,{headers:{Authorization:`Bearer ${await tokenProvider()}`,"Notion-Version":apiVersion},signal});
