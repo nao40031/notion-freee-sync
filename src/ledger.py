@@ -98,9 +98,6 @@ class Ledger:
             raise LedgerError("request_id_and_scope_hash_required")
         now = time.time() if now is None else now
         with self._transaction() as db:
-            unresolved = db.execute("SELECT request_id FROM sync_run WHERE status='unknown' LIMIT 1").fetchone()
-            if unresolved:
-                raise LedgerError("unresolved_unknown_exists")
             prior = db.execute("SELECT scope_hash,status FROM sync_run WHERE request_id=?", (request_id,)).fetchone()
             if prior:
                 if prior["scope_hash"] != scope_hash:
@@ -117,9 +114,8 @@ class Ledger:
             if not run or run["status"] != "running":
                 raise LedgerError("run_not_active")
             existing = db.execute("SELECT request_id,expires_at FROM sync_lease WHERE lease_name=?", (lease_name,)).fetchone()
-            if existing and existing["expires_at"] > now:
-                raise LedgerError("lease_busy")
-            db.execute("DELETE FROM sync_lease WHERE lease_name=?", (lease_name,))
+            if existing:
+                raise LedgerError("lease_busy_or_manual_recovery_required")
             db.execute("INSERT INTO sync_lease VALUES(?,?,?)", (lease_name, request_id, expires))
             self._audit(db, request_id, "lease_acquired", {"lease_name": lease_name, "expires_at": expires}, now)
         return expires

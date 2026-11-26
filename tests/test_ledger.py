@@ -25,14 +25,15 @@ class LedgerTests(unittest.TestCase):
             restarted.reserve_operation("run-1", "page:1", "body-hash", now=103)
         self.assertEqual(restarted.get_operation("run-1", "page:1")["status"], "unknown")
         restarted.finish_run("run-1", "unknown", now=104)
-        with self.assertRaisesRegex(LedgerError, "unresolved_unknown_exists"):
-            restarted.begin_run("run-2", "scope-hash", now=105)
+        restarted.begin_run("run-2", "other-scope", now=105)
 
     def test_lease_excludes_a_second_run_and_is_released_at_completion(self):
         self.ledger.acquire_lease("run-1", now=100)
         self.ledger.begin_run("run-2", "scope-hash", now=100)
-        with self.assertRaisesRegex(LedgerError, "lease_busy"):
+        with self.assertRaisesRegex(LedgerError, "lease_busy_or_manual_recovery_required"):
             self.ledger.acquire_lease("run-2", now=101)
+        with self.assertRaisesRegex(LedgerError, "lease_busy_or_manual_recovery_required"):
+            self.ledger.acquire_lease("run-2", now=200)
         self.ledger.finish_run("run-1", "complete", now=102)
         self.assertEqual(self.ledger.acquire_lease("run-2", now=103), 133)
 
