@@ -102,9 +102,10 @@ test("freee post read-back failure is durable unknown and prevents duplicate reg
 });
 
 test("OAuth token refresh is single-flight, rotates the refresh token, and does not expose credentials in errors",async()=>{
-  let calls=0;const store=tokenStore({access_token:"expired",refresh_token:"refresh-1",expires_at:0});
-  const options={tokenUrl:"https://oauth.invalid/token",clientId:"client-demo",clientSecret:"secret-demo",store,now:()=>100000,fetchImpl:async(_url,init)=>{calls++;assert.equal(init.method,"POST");await new Promise(resolve=>setTimeout(resolve,5));return{ok:true,status:200,json:async()=>({access_token:"access-2",refresh_token:"refresh-2",expires_in:3600})};}},manager=createOAuthTokenProvider(options),secondProcess=createOAuthTokenProvider(options);
+  let calls=0;const requests=[],store=tokenStore({access_token:"expired",refresh_token:"refresh-1",expires_at:0});
+  const options={tokenUrl:"https://oauth.invalid/token",clientId:"client-demo",clientSecret:"secret-demo",store,now:()=>100000,fetchImpl:async(_url,init)=>{calls++;requests.push(new URLSearchParams(init.body));assert.equal(init.method,"POST");await new Promise(resolve=>setTimeout(resolve,5));return{ok:true,status:200,json:async()=>({access_token:"access-2",refresh_token:"refresh-2",expires_in:3600})};}},manager=createOAuthTokenProvider(options),secondProcess=createOAuthTokenProvider(options);
   const tokens=await Promise.all([manager.getAccessToken(),manager.getAccessToken(),secondProcess.getAccessToken()]);assert.deepEqual(tokens,["access-2","access-2","access-2"]);assert.equal(calls,1);assert.equal(store.snapshot().refresh_token,"refresh-2");assert.equal(store.snapshot().access_token,"access-2");
+  await manager.exchangeCode({code:"fictional-one-time-code",redirectUri:"https://host.invalid/callback"});assert.equal(calls,2);assert.equal(requests[1].get("grant_type"),"authorization_code");assert.equal(requests[1].get("redirect_uri"),"https://host.invalid/callback");
   const failed=createOAuthTokenProvider({tokenUrl:"https://oauth.invalid/token",clientId:"client-demo",clientSecret:"secret-demo",store:tokenStore({refresh_token:"r",expires_at:0}),fetchImpl:async()=>({ok:false,status:401})});await assert.rejects(()=>failed.getAccessToken(),/oauth_client_auth_failed/);
 });
 
