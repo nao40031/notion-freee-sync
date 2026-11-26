@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "test:ledger": "python -m unittest tests.test_ledger -v",
     "scan": "node scripts/scan.mjs"
   }
 }

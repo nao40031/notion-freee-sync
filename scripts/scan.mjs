@@ -20,12 +20,12 @@ const markers = [
   ["local user path", /(?:[A-Z]:[\\/]{1,4}(?:Users|home)[\\/]|file:\/{2,3}[A-Z]:[\\/]{1,4}(?:Users|home)[\\/]|%USERPROFILE%[\\/]|(?:\\\\\\\\|\/\/)[^\\/\s]+[\\/](?:Users|home)[\\/])/i],
   ["credential-like assignment", /(?:client_secret|refresh_token|access_token|password)\s*[:=]\s*["'][^<][^"']{12,}["']/i],
 ];
-const forbiddenNames = /\.(?:sqlite(?:-(?:shm|wal))?|db|jsonl)$/i;
+const forbiddenNames = /\.(?:sqlite(?:-(?:shm|wal))?|db|jsonl|pyc)$/i;
 
 async function walk(dir) {
   const out = [];
   for (const item of await readdir(dir, {withFileTypes: true})) {
-    if (["node_modules", ".git"].includes(item.name)) continue;
+    if (["node_modules", ".git", "__pycache__"].includes(item.name)) continue;
     const path = join(dir, item.name);
     if (item.isDirectory()) out.push(...await walk(path));
     else out.push(path);

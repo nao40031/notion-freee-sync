@@ -11,15 +11,17 @@ The package has no embedded service credentials, company/data-source/page IDs, o
 - Do not create document headers or hard-delete pages.
 - Ambiguous line identity and inconsistent totals stop before any write.
 - Batch mode can pre-plan the whole snapshot and enforce no-op-only acceptance before calling a writer.
-- Production credentials, approved operating scope, durable audit storage and the platform's execution/permission controls remain deployment responsibilities.
+- The optional SQLite ledger persists run scope, leases, operation intents, audit events and unknown outcomes. Unknown operations are not replayed.
+- Production credentials, approved operating scope, binding the ledger to every external mutation, and the platform's execution/permission controls remain deployment responsibilities.
 
 ## Local checks
 
 ```sh
 npm test
+npm run test:ledger
 npm run scan
 ```
 
 ## Status
 
-This candidate is not published. Its structure and isolated tests have been reviewed. No live API has been called from this folder.
+This candidate is not published. Its structure and isolated tests have been reviewed. No live API has been called from this folder. Initial document registration, OAuth lifecycle, quote-to-invoice draft generation, production orchestration, and scheduler integration are not yet packaged as a runnable application.
