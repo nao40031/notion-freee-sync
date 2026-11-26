@@ -1,6 +1,6 @@
 # Notion × freee Sync Core
 
-Reusable JavaScript and Python components for quotation and invoice workflows between Notion and freee. This is the unreleased v0.2.0 candidate. Tests use fictional projects, fake API transports, and temporary SQLite databases. It has not been connected to a live Notion or freee workspace and is not a ready-made production installer.
+Reusable JavaScript and Python components for quotation and invoice workflows between Notion and freee. This is the v0.2.1 release candidate. Tests use fictional projects, fake API transports, and temporary SQLite databases. It has not been connected to a live Notion or freee workspace and is not a ready-made production installer.
 
 ## Included workflows
 
@@ -9,6 +9,8 @@ Reusable JavaScript and Python components for quotation and invoice workflows be
 `createFormalSyncService` composes the Notion/freee API clients, configured inventory, the baseline-derived sync planner, operation-scoped Notion transport, the SQLite lease/audit gate, read-back, unknown reconciliation, and local event monitor. Single-document and sequential batch runs use the same planner and writer path.
 
 Before writing, the runner verifies the active local policy scope, enumerates only registered quotations and invoices, validates IDs, data sources, relations and totals, fetches every source snapshot, and builds the full run plan. It then records each operation before calling Notion, verifies the result with GET, and stops on an uncertain result. Unknown mutations are reconciled by read-back; they are not sent again. The workflow does not create document headers, hard-delete pages, or write business data to freee.
+
+`service.run({ noOpOnly: true, expectedDocuments })` enables a no-op-only guard. `expectedDocuments` must be a non-empty array of `{ company_id, document_type, freee_id }` identities and must exactly match the registered inventory (no missing, extra, duplicate, or invalid identities). Under the same SQLite lease, the service prepares every document before allowing the run to finish; if any plan contains an operation, the whole run throws before creating any operation intent or sending a Notion mutation. The default `run()` behavior is unchanged. This guarded mode is **not a fully read-only execution**: it performs Notion/freee GET requests and acquires/releases the SQLite lease; lease bookkeeping may write SQLite state. It sends no business mutation when the guard passes, and stops on a detected difference.
 
 ### First quotation/invoice registration
 
@@ -47,6 +49,10 @@ npm run scan
 ```
 
 The integrated registered-sync E2E exercises two fictional project mappings. The registration suite exercises first quotation registration with a second mapping, POST-unknown reconciliation, quote-to-invoice generation, OAuth refresh token rotation, and the shared ledger-backed draft writer. Draft-builder tests cover quote/invoice payload mapping, invalid scope/totals, explicit task/price relation mapping, and half-cent rounding. The host-integration suite covers fake-DPAPI storage and lock contention, callback-to-token-exchange composition, sanitized Gmail API request construction, and Task Scheduler plan generation. The callback listener and actual Windows DPAPI/ACL behavior are not exercised against the host OS. All external API requests are faked; each ledger test uses a temporary SQLite database.
+
+### Private registered-sync connection
+
+For a Private host, pin this package to the approved immutable Public commit and inject the existing project config, OAuth/DPAPI token providers, Notion/freee transports, persistent monitor/notifier, and the already-approved SQLite path into `createFormalSyncService`. Keep the existing policy identity and exact scope; compare them before execution. Route scheduled sync through `service.run()` and map complete to exit 0 and partial/unknown or thrown errors to non-zero. Use `noOpOnly` only with an explicit expected document list. Keep first registration and invoice-draft generation on their separate per-operation approval routes. Never point a candidate at the production database or task until a separate cutover approval and rollback plan are in place.
 
 ## License
 

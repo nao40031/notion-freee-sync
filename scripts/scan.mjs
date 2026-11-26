@@ -4,7 +4,7 @@ import {promisify} from "node:util";
 import {join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 
-const execFile = promisify(execFileCallback);
+const execFile = (file,args,options={}) => promisify(execFileCallback)(file,args,{timeout:30000,...options});
 const root = fileURLToPath(new URL("../", import.meta.url));
 const repo = fileURLToPath(new URL("../", import.meta.url));
 const projectMarkers = [
@@ -34,6 +34,8 @@ async function walk(dir) {
 }
 
 const failures = [];
+let inspectedFiles=0,inspectedHistoryFiles=0;
+const progress=(phase,current,total)=>{if(current===1||current===total||current%100===0)process.stderr.write(`scan ${phase}: ${current}/${total}\n`);};
 function inspectText(label, text) {
   const variants = [text, text.replace(/\\u005c/gi, "\\").replace(/\\x5c/gi, "\\")];
   let decoded = text;
@@ -49,7 +51,8 @@ function inspectText(label, text) {
     if (candidates.some(value => pattern.test(value))) failures.push(`${label}: ${name}`);
   }
 }
-for (const file of await walk(root)) {
+const currentFiles=await walk(root);process.stderr.write(`scan current tree: ${currentFiles.length} files\n`);
+for (let index=0;index<currentFiles.length;index++) { const file=currentFiles[index];
   const path = relative(root, file).replaceAll("\\", "/");
   if (forbiddenNames.test(path)) {
     failures.push(`${path}: forbidden file`);
@@ -57,17 +60,22 @@ for (const file of await walk(root)) {
   }
   const text = await readFile(file, "utf8");
   inspectText(path, text);
+  inspectedFiles++;progress("current",index+1,currentFiles.length);
 }
 
 // Scan every committed file version, not only the current checkout.
 const {stdout: commitsText} = await execFile("git", ["rev-list", "--all"], {cwd: repo});
 const commits = commitsText.trim().split(/\r?\n/).filter(Boolean);
-for (const commit of commits) {
-  const {stdout: tree} = await execFile("git", ["ls-tree", "-r", "--name-only", commit], {cwd: repo});
-  for (const path of tree.split(/\r?\n/).filter(Boolean)) {
+process.stderr.write(`scan history: ${commits.length} commits\n`);
+let historyTotal=0;const commitTrees=[];
+for(const commit of commits){const {stdout:tree}=await execFile("git",["ls-tree","-r","--name-only",commit],{cwd:repo});const paths=tree.split(/\r?\n/).filter(Boolean);historyTotal+=paths.length;commitTrees.push({commit,paths});}
+process.stderr.write(`scan history files: ${historyTotal}\n`);
+for (const {commit,paths} of commitTrees) {
+  for (const path of paths) {
     if (forbiddenNames.test(path)) failures.push(`${commit}:${path}: forbidden file in history`);
     const {stdout: text} = await execFile("git", ["show", `${commit}:${path}`], {cwd: repo, maxBuffer: 8 * 1024 * 1024});
     inspectText(`${commit}:${path} in history`, text);
+    inspectedHistoryFiles++;progress("history",inspectedHistoryFiles,historyTotal);
   }
 }
 
@@ -82,5 +90,5 @@ if (failures.length) {
   process.stderr.write([...new Set(failures)].join("\n") + "\n");
   process.exitCode = 1;
 } else {
-  process.stdout.write(`candidate scan: current tree and ${commits.length} commit(s), 0 flagged files or metadata\n`);
+  process.stdout.write(`candidate scan: ${inspectedFiles} current file(s), ${inspectedHistoryFiles} historical file version(s) across ${commits.length} commit(s), 0 flagged files or metadata\n`);
 }

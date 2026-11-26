@@ -201,7 +201,9 @@ export function createFormalRegisteredSync({config,configPath,plannerPath=resolv
       }
       return {recovered,unresolved,status:unresolved.length?"unknown":"complete"};
     }finally{await ledger.release(lease);}}
-  return Object.freeze({ledger,recoverUnknown,async run({runId=`sync-${randomUUID()}`}={}){
+  return Object.freeze({ledger,recoverUnknown,async run({runId=`sync-${randomUUID()}`,noOpOnly=false,expectedDocuments}={}){
+    if(typeof noOpOnly!=="boolean")throw Error("formal_sync_no_op_mode_invalid");
+    if(noOpOnly&&(!Array.isArray(expectedDocuments)||!expectedDocuments.length))throw Error("formal_sync_expected_documents_required");
     const policy=await ledger.continuousSyncPolicy();if(policy?.active?.policy_id!==cfg.policy.policyId||policy?.active?.status!=="active")throw Error("formal_sync_policy_not_active");
     if(JSON.stringify(canonical(policy.active.scope))!==JSON.stringify(canonical(expectedPolicyScope(cfg))))throw Error("formal_sync_policy_scope_mismatch");
     const lease=await ledger.acquire();try{
@@ -211,6 +213,12 @@ export function createFormalRegisteredSync({config,configPath,plannerPath=resolv
       // Freeze one fully-read plan set before the first mutation. Any GET or
       // mapping error aborts this batch without a partial write.
       const prepared=[];for(const doc of docs)prepared.push(await prepare(doc));
+      if(noOpOnly){
+        const key=x=>{if(!x||!allowedTypes.has(x.document_type)||String(x.company_id)!==cfg.companyId||!/^[0-9]+$/.test(String(x.freee_id??"")))throw Error("formal_sync_expected_document_invalid");return`${x.company_id}|${x.document_type}|${x.freee_id}`;};
+        const expected=expectedDocuments.map(key),actual=prepared.map(x=>`${x.doc.company_id}|${x.doc.document_type}|${x.doc.freee_id}`);
+        if(new Set(expected).size!==expected.length||new Set(actual).size!==actual.length||JSON.stringify([...expected].sort())!==JSON.stringify([...actual].sort()))throw Error("formal_sync_expected_documents_mismatch");
+        if(prepared.some(x=>!x.plan.no_op||x.plan.operations.length))throw Error("formal_sync_no_op_diff_detected");
+      }
       const results=[];await emit({event:"sync_batch_started",run_id:runId,count:prepared.length});
       for(const item of prepared){try{const result=await applyPrepared(item,lease,runId);results.push({document_type:item.doc.document_type,freee_id:item.doc.freee_id,...result});await emit({event:result.status==="unchanged"?"sync_no_change":"sync_succeeded",run_id:runId,...results.at(-1)});}
         catch(error){const unknown=error?.unknown===true;results.push({document_type:item.doc.document_type,freee_id:item.doc.freee_id,status:unknown?"unknown":"failed",reason:String(error?.cause||error?.message||"sync_failed")});await emit({event:unknown?"sync_unknown":"sync_failed",run_id:runId,...results.at(-1)});if(unknown)break;}}
