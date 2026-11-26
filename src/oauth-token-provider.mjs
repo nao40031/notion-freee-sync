@@ -32,6 +32,6 @@ export function createOAuthTokenProvider({tokenUrl,clientId,clientSecret,store,f
     })();
     try{return await inflight;}finally{inflight=null;}
   }
-  async function exchangeCode({code,redirectUri}){if(typeof code!=="string"||!code||typeof redirectUri!=="string"||!redirectUri)throw Error("oauth_code_exchange_input_invalid");return request({grant_type:"authorization_code",code,redirect_uri:redirectUri});}
+  async function exchangeCode({code,redirectUri}){if(typeof code!=="string"||!code||typeof redirectUri!=="string"||!redirectUri)throw Error("oauth_code_exchange_input_invalid");return store.withLock(async()=>request({grant_type:"authorization_code",code,redirect_uri:redirectUri}));}
   return Object.freeze({getAccessToken,exchangeCode});
 }

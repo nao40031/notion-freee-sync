@@ -1,6 +1,6 @@
 # Host integration and setup
 
-This candidate provides reusable workflow code and API/ledger contracts. The adopting project supplies credential storage, approval UI, OAuth redirect handling, task scheduling and any external notification destination. No production installer or Windows Credential Manager adapter is included.
+This candidate provides reusable workflow code and host adapters. The adopting project supplies project configuration, API credentials, the official approval surface, and deployment settings. Windows DPAPI storage, loopback callback handling, Gmail API notification transport, and a Windows Task Scheduler management script are included; they are opt-in host components and have not been used against a production account or task.
 
 ## 1. Prepare an isolated project
 
@@ -10,12 +10,14 @@ This candidate provides reusable workflow code and API/ledger contracts. The ado
 
 ## 2. Provide OAuth token storage
 
-Construct `createOAuthTokenProvider` separately for Notion and freee. Supply each provider a `store` implementing:
+Construct `createOAuthTokenProvider` separately for Notion and freee. On Windows, `WindowsDpapiTokenStore` implements its store contract using CurrentUser DPAPI, a user-only protected credential directory, atomic encrypted-file replacement, and an exclusive cross-process lock. Choose a distinct `appName` and `profile` for each project/service. The adapter refuses non-Windows execution unless a test DPAPI adapter is injected. A lock that remains after a crash is never removed automatically; inspect and recover it explicitly.
+
+The provider requires a store implementing:
 
 - `load()` and `save(tokenRecord)` backed by a host-protected credential store;
 - `withLock(async callback)`, a cross-process exclusive lock around refresh-token read/rotation. Re-read the token after acquiring the lock, as the provider does.
 
-Do not put client secrets or token values in JSON configuration, command-line arguments, environment dumps, logs, SQLite audit records, or Git. The host owns the redirect URI and authorization-code capture. `exchangeCode({code,redirectUri})` exchanges a one-time code; `getAccessToken()` returns a current token or refreshes under the store lock. The candidate does not implement the browser callback or Credential Manager storage adapter. A missing/invalid refresh token fails with a sanitized error and requires host-managed reauthorization.
+Do not put client secrets or token values in JSON configuration, command-line arguments, environment dumps, logs, SQLite audit records, or Git. `startLoopbackOAuthCallback` accepts only a loopback listener, generates a random state, validates state and single-use callback parameters, and returns the code without exchanging or logging it. The host then calls `exchangeCode({code,redirectUri})`; both authorization-code exchange and refresh occur under the store lock. A missing/invalid refresh token fails with a sanitized error and requires host-managed reauthorization. Provider-specific client registration and redirect URI registration remain host setup.
 
 ## 3. Configure and approve registered synchronization
 
@@ -31,7 +33,7 @@ For quote-to-invoice draft generation, map the draft header/line data sources, t
 
 ## 5. Monitoring and recovery
 
-Keep `src/local-monitor.mjs` events sanitized. The host's notification sink should alert only for failure or unknown, suppress duplicate alerts by event fingerprint, and never trigger a business operation. Logs and notification state stay outside Git. A notification error must be recorded separately and must not cause a business mutation retry.
+Keep `src/local-monitor.mjs` events sanitized. The host's notification sink should alert only for failure or unknown, suppress duplicate alerts by event fingerprint, and never trigger a business operation. `createGmailApiNotifier` is an optional Gmail API `messages.send` transport that accepts a host OAuth token provider and explicit sender/recipient; configure a credential with only the `gmail.send` scope and keep OAuth client details/token store outside Git. The notifier sends no successful-run email and includes only sanitized operational fields. Logs and notification state stay outside Git. A notification error must be recorded separately and must not cause a business mutation retry.
 
 If a process exits, inspect the ledger status and exact target via API GET before restarting. A live lease blocks a second run. A stale lease is reclaimed only when the same host can confirm the owner process has exited. An operation marked `started` or `unknown` remains blocked until exact read-back confirms one result; missing or multiple candidates require manual investigation.
 
@@ -43,8 +45,8 @@ Create a host-owned JavaScript module outside this repository that exports `crea
 npm run run:sync -- --host-module /absolute/path/to/protected-host.mjs
 ```
 
-The wrapper runs exactly once, emits sanitized start/completion/failure events, and exits nonzero on a failed run. It does not create or enable a schedule. The registered sync service acquires the SQLite single-writer lease, so overlapping scheduler/manual invocations fail closed. Keep scheduler registration, account, working directory, log retention and stop/restart procedure in the adopting project's operational runbook.
+The wrapper runs exactly once, emits sanitized start/completion/failure events, and exits nonzero on a failed run. It does not create or enable a schedule. The registered sync service acquires the SQLite single-writer lease, so overlapping scheduler/manual invocations fail closed. On Windows, `scripts/manage-windows-sync-task.ps1 -Mode plan` prints a proposed weekday schedule without creating a task. `-Mode register -Apply` registers it disabled; `-Mode resume -Apply` enables it, and `-Mode stop -Apply` stops/disables it. The script requires the project root and external host module path, runs only under the current interactive user, and refuses duplicate task names. Review the printed plan and task account before using `-Apply`. Keep scheduler registration, account, working directory, log retention and stop/restart procedure in the adopting project's operational runbook.
 
 ## 7. Rollout checks
 
-Start with fake API transports and a new temporary SQLite file. Verify scope, inventory, totals/tax, relations, one mapped project, then a second distinct mapping, notification sink, restart and restore procedures. Before live rollout, separately review API app permissions, credential-store implementation, callback handling, operator authorization, network access, task account, working directory, schedule, backup, alert destination and rollback. This candidate's tests do not certify those deployment-specific controls.
+Start with fake API transports and a new temporary SQLite file. Verify scope, inventory, totals/tax, relations, one mapped project, then a second distinct mapping, notification sink, restart and restore procedures. Before live rollout, separately review API app permissions, real Windows DPAPI behavior under the target account, callback registration/firewall availability, operator authorization, network access, task account, working directory, schedule, backup, alert destination and rollback. The isolated suite verifies the adapter contracts with fake DPAPI/API/scheduler-plan inputs; it does not certify a real Gmail send, real OAuth consent, or actual task registration.

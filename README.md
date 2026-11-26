@@ -18,15 +18,17 @@ Before writing, the runner verifies the active local policy scope, enumerates on
 
 `generateInvoiceDraft` validates source identity, line arithmetic, tax rates, totals and rounding before generating an independent invoice draft. `createLedgerBackedInvoiceDraftRuntime` binds it to the shared SQLite lease and external-operation ledger, mapped Notion properties, request keys, Relations, operation-scoped approval, and read-back. Unknown creates are resolved only when a unique matching page can be verified; otherwise processing stops for manual recovery.
 
-### OAuth and operation support
+### Host connections
 
-`createOAuthTokenProvider` exchanges authorization codes and refreshes tokens through a host-owned secure token store. The store must implement a cross-process `withLock` around refresh-token reads and writes; this is needed when a scheduled run and manual run can overlap. The repository does not ship a platform credential-store adapter or an interactive callback server. `src/local-monitor.mjs` provides sanitized local events and a notification sink port; a host chooses and secures the actual destination.
+`createOAuthTokenProvider` exchanges authorization codes and refreshes tokens through a store with a cross-process `withLock`. The candidate includes `WindowsDpapiTokenStore`, which encrypts token records with Windows CurrentUser DPAPI, protects its directory ACL, atomically replaces token files, and serializes access. It also includes a provider-neutral `startLoopbackOAuthCallback` that binds to IPv4 loopback and validates a one-time state before returning a code. OAuth app registration, consent, client-secret provisioning and real-account validation remain adopter setup.
 
-`npm run run:sync -- --host-module <absolute-path-outside-repository>` is the single-run entry point for a scheduler or operator. The external host module exports `createSyncHost()` and returns `{ service, emit }`; it owns credentials, approval/setup, and event delivery. The service's SQLite lease rejects concurrent invocations. The wrapper runs once and exits; Task Scheduler/cron registration and enablement remain deployment-specific.
+`src/local-monitor.mjs` provides sanitized local events and duplicate suppression. `createGmailApiNotifier` is an optional Gmail API sender that uses an injected OAuth token provider and explicit sender/recipient settings. Configure only the `gmail.send` scope; no mailbox or destination is embedded in the repository.
+
+`npm run run:sync -- --host-module <absolute-path-outside-repository>` is the single-run entry point for a scheduler or operator. The external host module exports `createSyncHost()` and returns `{ service, emit }`; it owns project configuration, API clients, official operator-approval surface and event delivery. The service's SQLite lease rejects concurrent business runs. The wrapper runs once and exits. `scripts/manage-windows-sync-task.ps1 -Mode plan` previews a weekday Task Scheduler configuration. Registering a task requires explicit `-Apply` and registers it disabled; `-Mode stop` and `-Mode resume` explicitly disable or enable an existing task. Actual registration and enablement are deployment actions and are not performed by the tests.
 
 ## Project configuration
 
-Copy `config.example.json` outside the repository and supply the target company's freee ID, Notion data sources, property names/types, relation mappings, state values, policy scope, and invoice-draft mappings. Keep credentials, local configuration, SQLite, logs and notification state outside Git. The sample contains placeholders only. A host must provide a protected config/SQLite path, token store, OAuth registration flow, and explicit operation/policy approval interface.
+Copy `config.example.json` outside the repository and supply the target company's freee ID, Notion data sources, property names/types, relation mappings, state values, policy scope, and invoice-draft mappings. Keep credentials, local configuration, SQLite, logs and notification state outside Git. The sample contains placeholders only. On Windows, the included DPAPI token store can protect OAuth tokens; the adopter still registers the OAuth app, grants consent, configures the callback, provisions client credentials outside the repository, and supplies the official operation/policy approval interface.
 
 The persistent operating policy must exactly match the configured company, databases, document types, actions, property allowlists and batch limit. Policy approval is an operational authorization boundary; it is not a cryptographic identity assertion and does not replace the host OS or API permissions.
 
@@ -40,12 +42,12 @@ npm run test:formal-sync
 npm run scan
 ```
 
-The integrated registered-sync E2E exercises two fictional project mappings. The registration suite exercises first quotation registration with a second mapping, POST-unknown reconciliation, quote-to-invoice generation, OAuth refresh token rotation, and the shared ledger-backed draft writer. All external requests are faked; each ledger test uses a temporary SQLite database.
+The integrated registered-sync E2E exercises two fictional project mappings. The registration suite exercises first quotation registration with a second mapping, POST-unknown reconciliation, quote-to-invoice generation, OAuth refresh token rotation, and the shared ledger-backed draft writer. The host-integration suite covers fake-DPAPI storage and lock contention, callback-to-token-exchange composition, sanitized Gmail API request construction, and Task Scheduler plan generation. The callback listener and actual Windows DPAPI/ACL behavior are not exercised against the host OS. All external API requests are faked; each ledger test uses a temporary SQLite database.
 
 ## Security and verification limits
 
-- No real API calls, live OAuth, Windows credential store, scheduled task, production SQLite, or external email delivery is verified by this candidate.
-- A host must implement the token store's cross-process lock, secure secret storage, redirect/callback handling, regular operator authorization, notifications, and scheduler lifecycle.
+- No real API calls, live OAuth consent, Windows DPAPI/ACL under an adopter account, actual Task Scheduler registration/execution, production SQLite, or external email delivery is verified by this candidate.
+- The generic host adapters provide secure-storage, callback, notification and schedule-management code; adopters still provision provider credentials and configuration and validate them under the target Windows account.
 - Initial freee registration and invoice draft creation require an explicit host-provided operation approval. Registered sync requires a separately approved bounded operating policy.
 - Never retry a create after an unknown result. Read back and reconcile one exact candidate; otherwise stop.
 - Do not widen policy, targets, data sources, properties, or actions just to make a plan pass.
