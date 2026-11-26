@@ -1,28 +1,41 @@
-# Notion ↔ freee Sync Core (preview)
+# Notion ↔ freee Sync Core (isolated integration candidate)
 
-Configurable building blocks for synchronizing **already registered** freee quotations and invoices into existing Notion records. This is an isolated extraction preview, not a production-ready installer.
+This repository contains reusable synchronization components for quotations and invoices that are already registered in freee and linked to existing Notion pages. It is an isolated development candidate. It is not a production installer and has not been connected to a live workspace.
 
-The package has no embedded service credentials, company/data-source/page IDs, or real transaction fixtures. Authentication is injected through token-provider functions. Mapping and scope are supplied through configuration. Fake tests use synthetic data only.
+## Integrated registered-document flow
 
-## Safety boundary
+`createFormalSyncService` composes the existing API clients, registered-document inventory, the Private Phase 8 synchronization planner, the operation-scoped Notion transport, a SQLite lease/audit gate, read-back verification, recovery, and the local monitor. The single-document and batch execution use the same sequential runner. It uses the local monitor by default; a deployment can inject another event sink. Project identifiers, Notion data sources, property names/types, approved operations, and line matching rules come from a local configuration file.
 
-- Read the linked freee document and existing Notion pages before planning changes.
-- Never infer a Notion target from a document number alone.
-- Do not create document headers or hard-delete pages.
-- Ambiguous line identity and inconsistent totals stop before any write.
-- Batch mode can pre-plan the whole snapshot and enforce no-op-only acceptance before calling a writer.
-- The optional SQLite ledger persists run scope, leases, operation intents, audit events and unknown outcomes. Unknown operations are not replayed.
-- The optional local monitor records events and can call a deployment-provided notification function; its state files must remain outside Git.
-- Production credentials, approved operating scope, binding the ledger to every external mutation, and the platform's execution/permission controls remain deployment responsibilities.
+Before any mutation, the runner verifies that the active SQLite policy exactly matches the configured company, data sources, document types, operations, property allowlists, and batch limit; enumerates registered records; validates their page/data-source/relation identities; retrieves all freee and Notion snapshots; and prepares every plan. It then applies only planned operations. Each operation is recorded before the API call and confirmed by a Notion GET. An uncertain result is reconciled by read-back; it is never resent automatically. A lease prevents concurrent runs.
 
-## Local checks
+The standard Notion client is given a short-lived operation-specific scope for each planned write. The persistent policy is recorded in the existing SQLite audit events and must first be approved in the local Windows terminal by its operator. No separate policy table or journal is added. That local policy is a deployment control; it does not claim cryptographic identity or replace the host's normal permission controls.
+
+## Scope and current limits
+
+- Supports registered quotation and invoice synchronization from freee to existing Notion records.
+- Supports header updates, line updates/creation, and archiving removed lines when explicitly included in policy.
+- Does not create document headers, hard-delete pages, or write business data to freee.
+- Uses the copied Private baseline synchronization planner and a focused extraction of its SQLite operation-gate contract.
+- API tokens are supplied by host-provided token-provider functions. OAuth enrollment/refresh setup and production credential-store integration are deployment work.
+- The test suite uses fake HTTP endpoints and temporary SQLite databases only. No live API or production database has been used from this candidate.
+- Initial quotation/invoice registration, quote-to-invoice draft generation, unattended scheduling, and production monitoring deployment are not packaged as a complete installable application yet.
+
+## Configuration
+
+Copy `config.example.json` outside the repository and replace every placeholder with the target project's company ID, data-source IDs, relation names, property names/types, and approved policy values. Keep local credentials, config, SQLite databases, event logs, and notification state outside Git. The example is a schema guide; it is intentionally not runnable until all placeholders and property allowlists are configured.
+
+The configuration scope must exactly match the active SQLite policy. Changing a company, database, action, property, or batch bound requires a fresh policy approval. Never widen the configuration to make a failed plan pass.
+
+## Isolated checks
 
 ```sh
 npm test
-npm run test:ledger
+npm run test:formal-sync
 npm run scan
 ```
 
-## Status
+`formal-flow-e2e.test.mjs` runs the integrated runner against the real Notion/freee client code pointed at fake HTTP endpoints and two independent synthetic project mappings. It uses real temporary SQLite files to verify mixed quotation/invoice batch sync, line ID replacement, added/archived lines, no-op, scope mismatch rejection, operation auditing, read-back, restart recovery, unknown-stop/no-replay, and fake error notification. Existing unit tests cover the reusable planner, API clients, batch coordinator, and local monitor.
 
-This candidate is not published. Its structure and isolated tests have been reviewed. No live API has been called from this folder. The ledger is not connected to the writer or batch runner. Initial document registration, OAuth lifecycle, quote-to-invoice draft generation, production orchestration, recovery and scheduler integration are not yet packaged as a runnable application.
+## Release status
+
+Not published. Review the full source and Git history, third-party notices, license rights, project-specific configuration, and a clean-install procedure before any public release. No live credentials, company/data-source/page IDs, transaction examples, runtime logs, or production SQLite files belong in this repository.

@@ -1,11 +1,13 @@
-# Setup (preview)
+# Deployment setup (candidate)
 
-1. Copy `config.example.json` to a machine-local configuration file covered by `.gitignore`.
-2. Set your freee company scope, Notion data sources, property map and the exact operations allowed for that deployment.
-3. Supply API tokens through the host credential store or a token-provider callback. Never place a token in configuration committed to Git.
-4. Run the fake test suite and review a read-only data-source inventory.
-5. Verify registered identity using `(company, document type, freee ID)`; document number is an additional consistency check only.
-6. Validate totals, line identity, parent relations and allowed properties before enabling the writer.
-7. Keep the production writer off until the operator has configured and accepted the scope in the host's normal permission flow.
+This guide describes the configuration and host responsibilities for the extracted registered-sync flow. The repository does not yet provide a one-command production installer or a platform-specific credential-store integration.
 
-The preview library does not register a Windows scheduled task or perform live service operations. Deployment-specific audit storage and the authoritative permission/approval mechanism must be supplied by the host application.
+1. Create a project-local copy of `config.example.json` outside the repository and replace all placeholders. Map the company's freee ID, quotation/invoice header and line data sources, relation property names, Notion property names and types, allowed actions/properties, registration/synced state labels, and line reissue key fields.
+2. Keep the local config and SQLite path in a user-protected runtime directory. The existing `.gitignore` excludes local configs, credentials, database files, logs, state, and Python caches.
+3. Provide `notionTokenProvider` and `freeeTokenProvider` callbacks backed by the deployment host's credential store. Tokens must not enter config, process logs, or Git. OAuth enrollment and refresh are still host integration work.
+4. Before the first run, the operator reviews the complete scope printed from the local config and activates the matching persistent policy in an interactive local terminal. Use `createGateLedger` to acquire a lease, call `approveContinuousSyncPolicy({lease})`, then release the lease in a `finally` block. The gate inherits the local terminal, displays the scope and confirmation phrase, and requires the operator to enter it. The policy is stored as the existing audit events; no extra policy table is created. A changed company, data source, action, property allowlist, or document limit no longer matches the stored scope and stops the runner.
+5. Compose `createFormalSyncService` with the config, config path, protected SQLite path, token providers, and API transports. Use `run()` for the sequential registered-document batch. Use `recoverUnknown()` only to reconcile recorded outcomes by read-back; it does not replay mutations.
+6. On every run, inspect the emitted summary and sanitized local logs. An unknown operation requires manual investigation and remains blocked until a unique read-back proves its outcome. Do not edit or delete unresolved ledger rows to force a retry.
+7. For initial rollout, use a test workspace and a separate temporary SQLite database. Confirm scope, inventory, line relations, total amounts/taxes, monitoring, backup, and a restoration procedure before considering any live write capability.
+
+The isolated E2E exercises this composition with fake HTTP and temporary SQLite. It does not establish a live OAuth credential provider, production key storage, deployment-level permission controls, scheduler, or operating procedure for a specific company. Those pieces must be reviewed and integrated by the adopting host before production use.

@@ -1,32 +1,82 @@
 {
-  "freee": {
-    "companyId": "<your-freee-company-id>",
-    "tokenSource": "environment-or-platform-credential-store"
-  },
+  "freee": { "companyId": "<freee-company-id>" },
   "notion": {
     "apiVersion": "2022-06-28",
     "documentSources": {
       "quotation": "<quotation-header-data-source-id>",
       "quotationLine": "<quotation-line-data-source-id>",
+      "quotationRelation": "<quotation-header-relation-property>",
       "invoice": "<invoice-header-data-source-id>",
-      "invoiceLine": "<invoice-line-data-source-id>"
+      "invoiceLine": "<invoice-line-data-source-id>",
+      "invoiceRelation": "<invoice-header-relation-property>"
     },
     "propertyMap": {
       "freeeId": "<freee-document-id-property>",
       "companyId": "<freee-company-id-property>",
       "documentNumber": "<document-number-property>",
+      "documentType": "<document-type-property>",
+      "inputState": "<registration-state-property>",
       "status": "<document-status-property>",
       "syncState": "<sync-state-property>",
       "sourceHash": "<source-hash-property>",
-      "syncedAt": "<sync-time-property>"
+      "syncedAt": "<sync-time-property>",
+      "title": "<document-title-property>",
+      "branch": "<document-branch-property>",
+      "amountExcludingTax": "<net-amount-property>",
+      "amountTax": "<tax-amount-property>",
+      "amountIncludingTax": "<gross-amount-property>",
+      "lineFreeeId": "<freee-line-id-property>",
+      "lineTitle": "<line-title-property>",
+      "quantity": "<line-quantity-property>",
+      "unitPrice": "<line-unit-price-property>",
+      "taxRate": "<line-tax-rate-property>",
+      "lineAmountExcludingTax": "<line-net-amount-property>",
+      "unit": "<line-unit-property>",
+      "lineNumber": "<line-number-property>",
+      "lineParentRelation": "<line-parent-relation-property>"
+    },
+    "propertyTypes": {
+      "freeeId": "rich_text",
+      "companyId": "rich_text",
+      "documentNumber": "rich_text",
+      "documentType": "select",
+      "inputState": "select",
+      "status": "select",
+      "syncState": "select",
+      "sourceHash": "rich_text",
+      "syncedAt": "date",
+      "title": "title",
+      "branch": "number",
+      "amountExcludingTax": "number",
+      "amountTax": "number",
+      "amountIncludingTax": "number",
+      "lineFreeeId": "rich_text",
+      "lineTitle": "rich_text",
+      "quantity": "number",
+      "unitPrice": "number",
+      "taxRate": "number",
+      "lineAmountExcludingTax": "number",
+      "unit": "rich_text",
+      "lineNumber": "number",
+      "lineParentRelation": "relation"
     }
   },
   "policy": {
+    "policyId": "<locally-approved-policy-id>",
     "direction": "freee-to-notion",
     "documentTypes": ["quotation", "invoice"],
+    "registeredStateValue": "<registered-state-value>",
+    "syncedStateValue": "<synced-state-value>",
     "maxDocumentsPerRun": 100,
+    "allowedActions": ["update", "create", "archive"],
     "allowHeaderCreate": false,
     "allowHardDelete": false,
-    "allowArchiveRemovedLines": true
+    "allowLineCreate": true,
+    "allowArchiveRemovedLines": true,
+    "allowedProperties": {
+      "header": ["<each-approved-header-property>"],
+      "line": ["<each-approved-line-property>", "<quotation-or-invoice-relation-property>"]
+    },
+    "lineReissueKeyFields": ["description", "quantity", "unit_price", "tax_rate", "amount_excluding_tax"]
   }
 }
