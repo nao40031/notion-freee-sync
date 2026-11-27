@@ -29,7 +29,7 @@ def load_config(path):
     if not company.isdigit() or not policy.get("policyId") or policy.get("direction")!="freee-to-notion":
         raise RuntimeError("project_policy_config_invalid")
     types=policy.get("documentTypes")
-    if not isinstance(types,list) or not types or set(types)-{"quotation","invoice"}: raise RuntimeError("project_document_types_invalid")
+    if not isinstance(types,list) or not types or set(types)-{"quotation","invoice"} or len(set(types))!=len(types): raise RuntimeError("project_document_types_invalid")
     sources={}
     for kind in types:
         header=docs.get(kind); line=docs.get(kind+"Line")
@@ -83,8 +83,30 @@ def latest_policy(db,cfg):
     if not row or row[0]!="continuous_sync_policy_enabled": return None
     try: item=json.loads(row[1])
     except Exception as exc: raise RuntimeError("continuous_sync_policy_record_invalid") from exc
-    if item.get("policy_id")!=cfg["policy_id"] or item.get("scope")!=policy_scope(cfg): raise RuntimeError("continuous_sync_policy_scope_mismatch")
+    validate_sync_policy_mapping(cfg)
+    if item.get("policy_id")!=cfg["policy_id"] or not policy_scopes_match(item.get("scope"),policy_scope(cfg)): raise RuntimeError("continuous_sync_policy_scope_mismatch")
     return item
+
+def validate_sync_policy_mapping(cfg):
+    sources=cfg["sources"]; types=cfg["policy"]["documentTypes"]; allowed=cfg["policy"]["allowedProperties"]
+    relation_names=[sources[k]["relation"] for k in types]
+    datasource_names=[sources[k][field] for k in types for field in ("header","lines")]
+    if len(set(relation_names))!=len(relation_names) or len(set(datasource_names))!=len(datasource_names) or set(relation_names)&set(datasource_names): raise RuntimeError("project_mapping_ambiguous")
+    if any(len(set(allowed.get(field,[])))!=len(allowed.get(field,[])) for field in ("header","line")) or not set(relation_names).issubset(set(allowed.get("line",[]))): raise RuntimeError("project_mapping_policy_mismatch")
+
+UNORDERED_POLICY_FIELDS=("document_types","header_datasources","line_datasources","actions","header_properties","line_properties")
+def _unique_strings(value):
+    if not isinstance(value,list) or any(not isinstance(x,str) or not x for x in value) or len(set(value))!=len(value): return None
+    return set(value)
+
+def policy_scopes_match(actual,expected):
+    if not isinstance(actual,dict) or not isinstance(expected,dict): return False
+    if set(actual)!=set(expected): return False
+    if actual.get("company_id")!=expected.get("company_id") or actual.get("max_documents")!=expected.get("max_documents"): return False
+    for field in UNORDERED_POLICY_FIELDS:
+        left,right=_unique_strings(actual.get(field)),_unique_strings(expected.get(field))
+        if left is None or right is None or left!=right: return False
+    return True
 
 def validate_evidence(db,cfg,e,page,is_create,require_active=True):
     scope=policy_scope(cfg); policy=latest_policy(db,cfg)
@@ -153,6 +175,7 @@ def main():
       if a.action in ("policy-approve","policy-revoke"):
         if not a.token or not row or row[0]!=a.token: raise RuntimeError("continuous_sync_policy_writer_lease_required")
         if not sys.stdin.isatty() or not sys.stdout.isatty(): raise RuntimeError("policy_operator_tty_required")
+        if a.action=="policy-approve": validate_sync_policy_mapping(cfg)
         phrase="APPROVE REGISTERED DOCUMENT SYNC" if a.action=="policy-approve" else "REVOKE REGISTERED DOCUMENT SYNC"
         print(json.dumps({"policy_id":cfg["policy_id"],"scope":policy_scope(cfg),"action":a.action},indent=2)); print(f'Type exactly "{phrase}": ',end="",flush=True)
         if sys.stdin.readline().strip()!=phrase: raise RuntimeError("policy_operator_declined")

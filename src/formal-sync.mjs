@@ -23,7 +23,7 @@ function validateConfig(config){
   const companyId=String(config?.freee?.companyId??"");
   if(!/^\d+$/.test(companyId))throw Error("formal_sync_company_id_invalid");
   const policy=config.policy, types=policy?.documentTypes, sources=config.notion?.documentSources, props=config.notion?.propertyMap;
-  if(policy?.direction!=="freee-to-notion"||!policy.policyId||!Array.isArray(types)||!types.length||types.some(t=>!allowedTypes.has(t))||!Array.isArray(policy.allowedActions)||policy.allowedActions.some(x=>!["update","create","archive"].includes(x)))throw Error("formal_sync_policy_config_invalid");
+  if(policy?.direction!=="freee-to-notion"||!policy.policyId||!Array.isArray(types)||!types.length||types.some(t=>!allowedTypes.has(t))||new Set(types).size!==types.length||!Array.isArray(policy.allowedActions)||policy.allowedActions.some(x=>!["update","create","archive"].includes(x))||new Set(policy.allowedActions).size!==policy.allowedActions.length)throw Error("formal_sync_policy_config_invalid");
   if(policy.allowHeaderCreate!==false||policy.allowHardDelete!==false||!policy.allowedProperties||!Array.isArray(policy.allowedProperties.header)||!Array.isArray(policy.allowedProperties.line))throw Error("formal_sync_policy_config_invalid");
   if(!sources||!props)throw Error("formal_sync_mapping_required");
   const docs={};
@@ -31,6 +31,9 @@ function validateConfig(config){
     if(!header||!lines||!relation)throw Error("formal_sync_datasource_mapping_incomplete");
     docs[type]={header:`collection://${String(header).replace(/^collection:\/\//,"")}`,lines:`collection://${String(lines).replace(/^collection:\/\//,"")}`,relation};
   }
+  const mapped=[...types.flatMap(type=>[docs[type].header,docs[type].lines]),...types.map(type=>docs[type].relation)];
+  if(new Set(mapped).size!==mapped.length||types.some(type=>!policy.allowedProperties?.line?.includes(docs[type].relation))||
+    [policy.allowedProperties?.header,policy.allowedProperties?.line].some(list=>!Array.isArray(list)||new Set(list).size!==list.length))throw Error("formal_sync_policy_mapping_ambiguous");
   const canonicalFields=["freeeId","companyId","documentNumber","documentType","inputState","status","syncState","sourceHash","syncedAt","title","branch","amountExcludingTax","amountTax","amountIncludingTax","lineFreeeId","lineTitle","quantity","unitPrice","taxRate","lineAmountExcludingTax","unit","lineNumber","lineParentRelation"];
   if(canonicalFields.some(k=>typeof props[k]!=="string"||!props[k]))throw Error("formal_sync_property_mapping_incomplete");
   const typesMap=config.notion.propertyTypes,allowedPropertyTypes=new Set(["title","rich_text","select","status","number","date","relation"]);
@@ -111,6 +114,14 @@ function makeScope(document,plan,requestId,config){
 function expectedPolicyScope(config){return {company_id:Number(config.companyId),document_types:[...config.types],
   header_datasources:config.types.map(type=>config.sources[type].header),line_datasources:config.types.map(type=>config.sources[type].lines),
   actions:[...config.policy.allowedActions],header_properties:config.policy.allowedProperties.header,line_properties:config.policy.allowedProperties.line,max_documents:config.policy.maxDocumentsPerRun};}
+const UNORDERED_POLICY_FIELDS=["document_types","header_datasources","line_datasources","actions","header_properties","line_properties"];
+function uniqueStringSet(value){if(!Array.isArray(value)||value.some(x=>typeof x!=="string"||!x)||new Set(value).size!==value.length)return null;return new Set(value);}
+export function policyScopesMatch(actual,expected){
+  if(!actual||!expected||JSON.stringify(Object.keys(actual).sort())!==JSON.stringify(Object.keys(expected).sort()))return false;
+  if(actual.company_id!==expected.company_id||actual.max_documents!==expected.max_documents)return false;
+  for(const field of UNORDERED_POLICY_FIELDS){const a=uniqueStringSet(actual[field]),e=uniqueStringSet(expected[field]);if(!a||!e||a.size!==e.size||[...e].some(x=>!a.has(x)))return false;}
+  return true;
+}
 function binder(plan){const used=new Set();return Object.freeze({async assertApproved(actual){const match=(op,index)=>({unused:!used.has(index),action:({update_header:"update",archive_candidate:"archive"}[op.action]||op.action)===actual.action,datasource:String(op.target)===String(actual.datasource),page:op.action==="create"||norm(op.page_id)===norm(actual.page_id),properties:JSON.stringify(canonical(op.properties||{}))===JSON.stringify(canonical(actual.properties||{})),relations:JSON.stringify(canonical(op.relations||{}))===JSON.stringify(canonical(actual.relations||{}))});const i=plan.operations.findIndex((op,index)=>Object.values(match(op,index)).every(Boolean));if(i<0)throw Error("formal_sync_transport_operation_mismatch");used.add(i);}});}
 
 function propertyMatch(expected,observed,config){const inverse=Object.fromEntries(Object.entries(config.properties).map(([logical,name])=>[name,logical]));for(const [key,value] of Object.entries(expected||{})){const date=/^date:(.+):start$/.exec(key),name=date?date[1]:key,logical=inverse[name],actual=logical?observed?.[logical]:observed?.[name];if(date&&value==="<set-at-apply-time>"){if(typeof actual!=="string"||!Number.isFinite(Date.parse(actual)))return false;}else if(JSON.stringify(actual)!==JSON.stringify(value))return false;}return true;}
@@ -122,7 +133,7 @@ export function runScopedSyncRequestId({runId,documentType,freeeId}={}){
 }
 
 /** Inject real or fake API ports; both use this exact runner/writer/ledger path. */
-export function createFormalRegisteredSync({config,configPath,plannerPath=resolve(HERE,"phase8_sync_planner.py"),dbPath,notion,freee,emit=async()=>{},python="python"}={}){
+export function createFormalRegisteredSync({config,configPath,plannerPath=resolve(HERE,"phase8_sync_planner.py"),dbPath,notion,freee,emit=async()=>{},python="python",operationGuard=async()=>{}}={}){
   const cfg=validateConfig(config);if(!configPath||!dbPath||typeof notion?.listRegisteredDocuments!=="function"||typeof notion?.getPage!=="function"||typeof notion?.updatePage!=="function"||typeof notion?.createPage!=="function"||typeof notion?.archivePage!=="function"||typeof freee?.getDocument!=="function")throw Error("formal_sync_ports_required");
   const ledger=createGateLedger({dbPath,configPath,python});
   async function prepare(doc){
@@ -189,7 +200,7 @@ export function createFormalRegisteredSync({config,configPath,plannerPath=resolv
     return {status:writesApplied?"synced":"unchanged",write_count:writesApplied,source_hash:planned.source_hash};
   }
   async function recoverUnknown(){
-    const lease=await ledger.acquire();try{const items=await ledger.recoveryItems(),recovered=[],unresolved=[];
+    const lease=await ledger.acquire();try{await operationGuard({lease,mode:"recover"});const items=await ledger.recoveryItems(),recovered=[],unresolved=[];
       for(const e of items){const op=e.operation,action=e.action;let candidate=null;
         if(action==="create"){const found=await notion.findCreateOutcome?.({requestId:e.request_id,sourceLineId:e.source_line_id,parentId:e.registered_identity.header_page_id,documentType:e.registered_identity.document_type});if(Array.isArray(found)&&found.length===1)candidate=found[0];}
         else candidate=await notion.getPage(e.page_id);
@@ -205,8 +216,9 @@ export function createFormalRegisteredSync({config,configPath,plannerPath=resolv
     if(typeof noOpOnly!=="boolean")throw Error("formal_sync_no_op_mode_invalid");
     if(noOpOnly&&(!Array.isArray(expectedDocuments)||!expectedDocuments.length))throw Error("formal_sync_expected_documents_required");
     const policy=await ledger.continuousSyncPolicy();if(policy?.active?.policy_id!==cfg.policy.policyId||policy?.active?.status!=="active")throw Error("formal_sync_policy_not_active");
-    if(JSON.stringify(canonical(policy.active.scope))!==JSON.stringify(canonical(expectedPolicyScope(cfg))))throw Error("formal_sync_policy_scope_mismatch");
+    if(!policyScopesMatch(policy.active.scope,expectedPolicyScope(cfg)))throw Error("formal_sync_policy_scope_mismatch");
     const lease=await ledger.acquire();try{
+      await operationGuard({lease,mode:noOpOnly?"preview":"sync"});
       const docs=await notion.listRegisteredDocuments({companyId:cfg.companyId,documentTypes:cfg.types,limit:cfg.policy.maxDocumentsPerRun,config:cfg});
       if(!Array.isArray(docs)||docs.length>cfg.policy.maxDocumentsPerRun)throw Error("formal_sync_inventory_invalid");
       const unique=new Set();for(const d of docs){if(d.registered!==true||String(d.company_id)!==cfg.companyId||!cfg.types.includes(d.document_type))throw Error("formal_sync_unregistered_document_rejected");const key=`${d.company_id}:${d.document_type}:${d.freee_id}`;if(unique.has(key))throw Error("formal_sync_duplicate_identity");unique.add(key);}
@@ -232,11 +244,11 @@ export function createFormalRegisteredSync({config,configPath,plannerPath=resolv
  *  are connected to the same registered-document runner and SQLite gate used
  *  by the isolated end-to-end suite. No credentials are read from the repo.
  */
-export function createFormalSyncService({config,configPath,dbPath,notionTokenProvider,freeeTokenProvider,notionFetch=globalThis.fetch,freeeFetch=globalThis.fetch,notionBaseUrl,freeeBaseUrl,emit=null,monitorPath=null,emailNotify=null,python="python"}={}){
+export function createFormalSyncService({config,configPath,dbPath,notionTokenProvider,freeeTokenProvider,notionFetch=globalThis.fetch,freeeFetch=globalThis.fetch,notionBaseUrl,freeeBaseUrl,emit=null,monitorPath=null,emailNotify=null,python="python",operationGuard=async()=>{}}={}){
   const ports=createFormalApiPorts({config,notionTokenProvider,freeeTokenProvider,notionFetch,freeeFetch,notionBaseUrl,freeeBaseUrl});
   const monitor=emit?null:createLocalSyncMonitor({...(monitorPath?{path:monitorPath}:{}),emailNotify});
   const eventSink=emit||((event)=>monitor.emit(event));
-  const runner=createFormalRegisteredSync({config,configPath,dbPath,notion:ports.notion,freee:ports.freee,emit:eventSink,python});
+  const runner=createFormalRegisteredSync({config,configPath,dbPath,notion:ports.notion,freee:ports.freee,emit:eventSink,python,operationGuard});
   return Object.freeze({...runner,ports});
 }
 

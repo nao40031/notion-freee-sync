@@ -1,6 +1,6 @@
 # Notion × freee Sync Core
 
-Reusable JavaScript and Python components for quotation and invoice workflows between Notion and freee. This is the v0.2.1 release candidate. Tests use fictional projects, fake API transports, and temporary SQLite databases. It has not been connected to a live Notion or freee workspace and is not a ready-made production installer.
+Reusable JavaScript and Python components for quotation and invoice workflows between Notion and freee. This is the v0.2.2 local release candidate, based on v0.2.1. Tests use fictional projects, fake API transports, and temporary SQLite databases. It has not been connected to a live Notion or freee workspace and is not a ready-made production installer.
 
 ## Included workflows
 
@@ -11,6 +11,12 @@ Reusable JavaScript and Python components for quotation and invoice workflows be
 Before writing, the runner verifies the active local policy scope, enumerates only registered quotations and invoices, validates IDs, data sources, relations and totals, fetches every source snapshot, and builds the full run plan. It then records each operation before calling Notion, verifies the result with GET, and stops on an uncertain result. Unknown mutations are reconciled by read-back; they are not sent again. The workflow does not create document headers, hard-delete pages, or write business data to freee.
 
 `service.run({ noOpOnly: true, expectedDocuments })` enables a no-op-only guard. `expectedDocuments` must be a non-empty array of `{ company_id, document_type, freee_id }` identities and must exactly match the registered inventory (no missing, extra, duplicate, or invalid identities). Under the same SQLite lease, the service prepares every document before allowing the run to finish; if any plan contains an operation, the whole run throws before creating any operation intent or sending a Notion mutation. The default `run()` behavior is unchanged. This guarded mode is **not a fully read-only execution**: it performs Notion/freee GET requests and acquires/releases the SQLite lease; lease bookkeeping may write SQLite state. It sends no business mutation when the guard passes, and stops on a detected difference.
+
+### v0.2.2 policy-scope and host guard changes
+
+Policy comparison treats only the explicitly defined allowlist arrays (`document_types`, header/line datasource IDs, allowed actions, and header/line property names) as unordered sets. Duplicate values are rejected. Company ID, policy ID, batch limit, active/revoked state, and all non-array scope values remain exact checks. Config validation also rejects datasource/relation collisions and requires each document type's configured relation to be allowed on its line datasource. Inventory checks the Notion header's document-type property against the datasource mapping before preparing any record; a swapped datasource/type mapping fails closed.
+
+`createFormalSyncService` accepts an optional `operationGuard({ lease, mode })` host callback. The runner calls it only after acquiring the existing SQLite lease and before inventory/read-back work; a thrown error aborts the run and releases the lease. The hook does not create another lease or ledger. Hosts using it must keep it read-only and fail closed. This is an extension point, not an approval provider or a substitute for the existing policy, approval, operation-intent, or read-back controls. Default synchronization behavior remains unchanged when the callback is omitted.
 
 ### First quotation/invoice registration
 
@@ -34,7 +40,7 @@ Before writing, the runner verifies the active local policy scope, enumerates on
 
 Copy `config.example.json` outside the repository and supply the target company's freee ID, Notion data sources, property names/types, relation mappings, state values, policy scope, and invoice-draft mappings. Keep credentials, local configuration, SQLite, logs and notification state outside Git. The sample contains placeholders only. On Windows, the included DPAPI token store can protect OAuth tokens; the adopter still registers the OAuth app, grants consent, configures the callback, provisions client credentials outside the repository, and supplies the official operation/policy approval interface.
 
-The persistent operating policy must exactly match the configured company, databases, document types, actions, property allowlists and batch limit. Policy approval is an operational authorization boundary; it is not a cryptographic identity assertion and does not replace the host OS or API permissions.
+The persistent operating policy must match the configured company, databases, document types, actions, property allowlists and batch limit. Allowlist array order does not affect equivalence, but membership, duplicates, mapping, scalar scope, revocation and active status are checked strictly. Policy approval is an operational authorization boundary; it is not a cryptographic identity assertion and does not replace the host OS or API permissions.
 
 The candidate uses run-scoped synchronization identities, preserves existing ledger tables when opening a database, and does not convert prior approvals or unresolved operations into new authorization. See the public [capability inventory](docs/capability-inventory.md) and [integration compatibility](docs/integration-compatibility.md) for supported interfaces and limits.
 
