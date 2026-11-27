@@ -72,6 +72,7 @@ def connect(path):
 
 def policy_scope(cfg):
     return {"company_id":cfg["company_id"],"document_types":cfg["policy"]["documentTypes"],
+      "document_mapping":cfg["sources"],
       "header_datasources":[cfg["sources"][t]["header"] for t in cfg["policy"]["documentTypes"]],
       "line_datasources":[cfg["sources"][t]["lines"] for t in cfg["policy"]["documentTypes"]],
       "actions":cfg["policy"]["allowedActions"],"header_properties":cfg["policy"]["allowedProperties"].get("header",[]),
@@ -103,6 +104,7 @@ def policy_scopes_match(actual,expected):
     if not isinstance(actual,dict) or not isinstance(expected,dict): return False
     if set(actual)!=set(expected): return False
     if actual.get("company_id")!=expected.get("company_id") or actual.get("max_documents")!=expected.get("max_documents"): return False
+    if not isinstance(actual.get("document_mapping"),dict) or not isinstance(expected.get("document_mapping"),dict) or actual["document_mapping"]!=expected["document_mapping"]: return False
     for field in UNORDERED_POLICY_FIELDS:
         left,right=_unique_strings(actual.get(field)),_unique_strings(expected.get(field))
         if left is None or right is None or left!=right: return False

@@ -5,6 +5,7 @@ import {fileURLToPath} from "node:url";
 import {policyScopesMatch} from "../src/formal-sync.mjs";
 
 const scope={company_id:7,document_types:["invoice","quotation"],
+  document_mapping:{quotation:{header:"quote-header",lines:"quote-line",relation:"Quote relation"},invoice:{header:"invoice-header",lines:"invoice-line",relation:"Invoice relation"}},
   header_datasources:["collection://quote-header","collection://invoice-header"],
   line_datasources:["collection://quote-line","collection://invoice-line"],
   actions:["create","update","archive"],header_properties:["Subject","Tax"],
@@ -26,5 +27,9 @@ test("JS and Python treat only approved policy arrays as unordered sets",()=>{
   const foreignCompany={...scope,company_id:8};
   const unexpectedField={...scope,unreviewed_scope:"extra"};
   const missingField={...scope};delete missingField.max_documents;
-  for(const candidate of [swapped,widened,duplicate,foreignCompany,unexpectedField,missingField]){assert.equal(policyScopesMatch(candidate,scope),false);assert.equal(pythonMatch(candidate,scope),false);}
+  const wrongLine=structuredClone(scope);wrongLine.document_mapping.quotation.lines="invoice-line";wrongLine.document_mapping.invoice.lines="quote-line";
+  const wrongHeader=structuredClone(scope);wrongHeader.document_mapping.quotation.header="invoice-header";wrongHeader.document_mapping.invoice.header="quote-header";
+  const wrongRelation=structuredClone(scope);wrongRelation.document_mapping.quotation.relation="Invoice relation";
+  const legacy={...scope};delete legacy.document_mapping;
+  for(const candidate of [swapped,widened,duplicate,foreignCompany,unexpectedField,missingField,wrongLine,wrongHeader,wrongRelation,legacy]){assert.equal(policyScopesMatch(candidate,scope),false);assert.equal(pythonMatch(candidate,scope),false);}
 });

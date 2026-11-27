@@ -113,12 +113,14 @@ function makeScope(document,plan,requestId,config){
 }
 function expectedPolicyScope(config){return {company_id:Number(config.companyId),document_types:[...config.types],
   header_datasources:config.types.map(type=>config.sources[type].header),line_datasources:config.types.map(type=>config.sources[type].lines),
+  document_mapping:Object.fromEntries(config.types.map(type=>[type,{header:config.sources[type].header,lines:config.sources[type].lines,relation:config.sources[type].relation}])),
   actions:[...config.policy.allowedActions],header_properties:config.policy.allowedProperties.header,line_properties:config.policy.allowedProperties.line,max_documents:config.policy.maxDocumentsPerRun};}
 const UNORDERED_POLICY_FIELDS=["document_types","header_datasources","line_datasources","actions","header_properties","line_properties"];
 function uniqueStringSet(value){if(!Array.isArray(value)||value.some(x=>typeof x!=="string"||!x)||new Set(value).size!==value.length)return null;return new Set(value);}
 export function policyScopesMatch(actual,expected){
   if(!actual||!expected||JSON.stringify(Object.keys(actual).sort())!==JSON.stringify(Object.keys(expected).sort()))return false;
   if(actual.company_id!==expected.company_id||actual.max_documents!==expected.max_documents)return false;
+  if(!actual.document_mapping||!expected.document_mapping||JSON.stringify(canonical(actual.document_mapping))!==JSON.stringify(canonical(expected.document_mapping)))return false;
   for(const field of UNORDERED_POLICY_FIELDS){const a=uniqueStringSet(actual[field]),e=uniqueStringSet(expected[field]);if(!a||!e||a.size!==e.size||[...e].some(x=>!a.has(x)))return false;}
   return true;
 }
